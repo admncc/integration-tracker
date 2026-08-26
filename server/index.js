@@ -6,6 +6,7 @@ import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, resolve } from 'node:path';
+import { db, setSetting } from './lib/db.js';
 import { attachUser } from './lib/auth.js';
 import { startDailyRefresh } from './lib/fx.js';
 import { authRouter } from './routes/auth.js';
@@ -51,7 +52,24 @@ app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 app.use(attachUser);
 
-app.get('/api/health', (_req, res) => res.json({ ok: true }));
+/*
+ * Touches the database rather than just proving the process is listening. With
+ * the filesystem full this used to stay 200 while every write - sign-in
+ * included - failed, so any uptime check built on it was green through a total
+ * outage. The write goes to a temporary table, so it costs nothing and leaves
+ * nothing behind.
+ */
+app.get('/api/health', (_req, res) => {
+  try {
+    // A real write to the real database file, which is what a full disk stops.
+    // One settings row, rewritten - it is the cheapest honest probe there is.
+    setSetting('health_probe_at', new Date().toISOString());
+    const sites = db.prepare('SELECT COUNT(*) AS n FROM sites').get().n;
+    res.json({ ok: true, sites });
+  } catch (err) {
+    res.status(503).json({ ok: false, error: err.message });
+  }
+});
 app.use('/api/auth', authRouter);
 app.use('/api/sites', sitesRouter);
 app.use('/api/issues', issuesRouter);
@@ -72,6 +90,19 @@ app.use((err, _req, res, _next) => {
 
   if (status >= 500) {
     console.error(err);
+
+    /*
+     * A full disk is an operational fact, not a bug, and it deserves to say so.
+     * Every write failed with "Something went wrong on the server", sign-in
+     * included - so the admin who came to diagnose the outage could not get in
+     * and had nothing pointing at the cause.
+     */
+    if (/disk is full|database or disk|SQLITE_FULL|ENOSPC/i.test(String(err?.message))) {
+      return res.status(507).json({
+        error: 'The server has run out of disk space, so nothing can be saved. Free some space and try again.',
+      });
+    }
+
     return res.status(500).json({ error: 'Something went wrong on the server' });
   }
 

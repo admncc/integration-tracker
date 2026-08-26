@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import type { RpmRow, Stats } from '../lib/types';
+import type { ActivityEntry, RpmRow, Stats } from '../lib/types';
 import { BASE_CURRENCY, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY, TRACK_STATUS, formatMoney, formatUplift } from '@shared/domain.js';
 import { Badge, Empty, Spinner, TONE_BG, TONE_TEXT, Timestamp, type Tone } from '../components/ui';
 
@@ -160,24 +160,9 @@ export default function Dashboard() {
           <ol className="space-y-2.5">
             {stats.recent.map((entry) => (
               <li key={entry.id} className="border-l border-line pl-3 text-xs">
-                <div className="text-ink-soft">
+                <div className="text-ink-soft [overflow-wrap:anywhere]">
                   <span className="font-medium text-ink">{entry.actor_name ?? 'System'}</span>{' '}
-                  {entry.kind === 'issue_created'
-                    ? 'raised'
-                    : entry.kind === 'issue_status'
-                      ? 'moved'
-                      : entry.kind === 'attachment_added'
-                        ? 'attached'
-                        : entry.kind === 'message_posted'
-                          ? 'wrote'
-                          : entry.kind === 'issue_deleted'
-                            ? 'deleted'
-                            : entry.kind === 'issue_restored'
-                              ? 'restored'
-                              : entry.kind === 'site_deleted'
-                                ? 'deleted the domain'
-                                : 'changed'}{' '}
-                  {entry.kind === 'issue_status' ? (ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value) : entry.new_value ?? entry.field}
+                  <ActivityLine entry={entry} />
                   {entry.domain && (
                     <>
                       {' on '}
@@ -196,6 +181,82 @@ export default function Dashboard() {
       </div>
     </div>
   );
+}
+
+/** Column headings as they read on screen, for the site-edit entries. */
+const FIELD_LABELS: Record<string, string> = {
+  priority: 'the priority',
+  domain: 'the domain',
+  test_url: 'the test URL',
+  status_video: 'Video',
+  status_display: 'Display',
+  status_ads_txt: 'ads.txt',
+  status_ad_tag: 'Ad tag',
+  status_mcm: 'MCM',
+  cmp: 'CMP',
+  approval: 'the approval',
+  rpm_previous: 'Previous Session RPM',
+  rpm_primis: 'Primis Session RPM',
+  rpm_previous_currency: 'the previous RPM currency',
+  rpm_primis_currency: 'the Primis RPM currency',
+  managed_by: 'Managed by',
+  archived: 'the archived flag',
+};
+
+const TRACK_FIELDS = new Set(['status_video', 'status_display', 'status_ads_txt', 'status_ad_tag', 'status_mcm']);
+
+/**
+ * One line of the feed, in words.
+ *
+ * The old version printed the raw stored value with no subject: an issue move
+ * read "moved In progress" without saying which issue, and a site edit fell
+ * through to "changed live" - five identical lines for one domain going live.
+ */
+function ActivityLine({ entry }: { entry: ActivityEntry }) {
+  const issueLink = entry.issue_id ? (
+    <Link to={`/issues/${entry.issue_id}`} className="text-ink hover:text-brand hover:underline">
+      {entry.issue_title ?? `#${entry.issue_id}`}
+    </Link>
+  ) : null;
+
+  switch (entry.kind) {
+    case 'issue_created':
+      return <>raised {issueLink ?? entry.new_value}</>;
+    case 'issue_deleted':
+      return <>deleted the issue {issueLink ?? entry.new_value}</>;
+    case 'issue_restored':
+      return <>restored the issue {issueLink ?? entry.new_value}</>;
+    case 'attachment_added':
+      return <>attached {entry.new_value} to {issueLink ?? 'an issue'}</>;
+    case 'message_posted':
+      return <>wrote in the discussion: "{entry.new_value}"</>;
+    case 'message_deleted':
+      return <>deleted a discussion message</>;
+    case 'message_restored':
+      return <>restored a discussion message</>;
+    case 'site_created':
+      return <>added the domain</>;
+    case 'site_deleted':
+      return <>deleted the domain {entry.new_value}</>;
+    case 'import':
+      return <>imported sites ({entry.new_value})</>;
+    case 'issue_status':
+      return (
+        <>
+          moved {issueLink ?? 'an issue'} to{' '}
+          {ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value}
+        </>
+      );
+    default: {
+      const field = entry.field ?? '';
+      const label = FIELD_LABELS[field] ?? field;
+      const value = TRACK_FIELDS.has(field)
+        ? (TRACK_STATUS[entry.new_value as keyof typeof TRACK_STATUS]?.label ?? entry.new_value)
+        : entry.new_value;
+      if (!field) return <>changed {value}</>;
+      return <>set {label} to {value || 'nothing'}</>;
+    }
+  }
 }
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: Tone }) {

@@ -11,12 +11,35 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * A request that never comes back is worse than one that fails: the optimistic
+ * cell keeps the typed value and nothing ever says it was not saved. Thirty
+ * seconds is well beyond any real response here.
+ */
+const TIMEOUT_MS = 30_000;
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/api${path}`, {
-    credentials: 'same-origin',
-    headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
-    ...options,
-  });
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), TIMEOUT_MS);
+
+  let response: Response;
+  try {
+    response = await fetch(`/api${path}`, {
+      credentials: 'same-origin',
+      headers: options.body ? { 'Content-Type': 'application/json' } : undefined,
+      signal: abort.signal,
+      ...options,
+    });
+  } catch (err) {
+    // "Failed to fetch" is the browser's wording for offline, a dead server and
+    // a DNS failure alike, and it tells the reader nothing about what to do.
+    if (err instanceof DOMException && err.name === 'AbortError') {
+      throw new ApiError('The server did not answer within 30 seconds. Nothing was saved - try again.', 0);
+    }
+    throw new ApiError('No connection to the server. Check your network and try again - nothing was saved.', 0);
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (response.status === 204) return undefined as T;
 

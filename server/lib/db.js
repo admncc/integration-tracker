@@ -54,7 +54,10 @@ CREATE TABLE IF NOT EXISTS sites (
   rpm_previous          REAL,
   rpm_previous_currency TEXT NOT NULL DEFAULT 'EUR',
   rpm_primis            REAL,
-  rpm_primis_currency   TEXT NOT NULL DEFAULT 'USD',
+  -- Both RPM columns default to the base currency. The Primis column used to
+  -- default to USD, so a figure typed as euros next to a euro figure was read
+  -- as dollars and the uplift beside it was wrong by the exchange rate.
+  rpm_primis_currency   TEXT NOT NULL DEFAULT 'EUR',
   managed_by        TEXT NOT NULL DEFAULT '',
   notes             TEXT NOT NULL DEFAULT '',
   archived          INTEGER NOT NULL DEFAULT 0,
@@ -100,7 +103,6 @@ CREATE TABLE IF NOT EXISTS issues (
 );
 CREATE INDEX IF NOT EXISTS idx_issues_site ON issues(site_id);
 CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
-CREATE INDEX IF NOT EXISTS idx_issues_batch ON issues(batch_id);
 
 CREATE TABLE IF NOT EXISTS comments (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,10 +152,25 @@ CREATE INDEX IF NOT EXISTS idx_activity_site ON activity(site_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_issue ON activity(issue_id, id DESC);
 `);
 
-/**
- * Migration for databases created before usernames existed: adds the column,
- * backfills it from the e-mail local part and enforces uniqueness.
+/*
+ * Columns that the CREATE TABLE blocks above cannot add to a database that
+ * already exists, and that a later migration or index depends on. They come
+ * first, so nothing downstream names a column that is not there yet - an index
+ * on issues.batch_id used to sit inside the CREATE TABLE block and take the
+ * whole boot down with "no such column" on any database predating it.
+ *
+ * Columns whose migration also backfills data keep their own block below.
  */
+const LATE_COLUMNS = [
+  ['issues', 'batch_id', 'INTEGER REFERENCES batches(id) ON DELETE SET NULL'],
+  ['site_messages', 'reply_to_id', 'INTEGER REFERENCES site_messages(id) ON DELETE SET NULL'],
+];
+
+for (const [table, column, definition] of LATE_COLUMNS) {
+  const present = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
+  if (!present) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
 /** Renames the earlier generic RPM columns onto the two the team actually enters. */
 const siteColumns = db.prepare('PRAGMA table_info(sites)').all().map((c) => c.name);
 if (siteColumns.includes('rpm_benchmark') && !siteColumns.includes('rpm_previous')) {
@@ -168,7 +185,7 @@ if (!siteColumns.includes('rpm_previous_currency')) {
   db.exec("ALTER TABLE sites ADD COLUMN rpm_previous_currency TEXT NOT NULL DEFAULT 'EUR'");
 }
 if (!siteColumns.includes('rpm_primis_currency')) {
-  db.exec("ALTER TABLE sites ADD COLUMN rpm_primis_currency TEXT NOT NULL DEFAULT 'USD'");
+  db.exec("ALTER TABLE sites ADD COLUMN rpm_primis_currency TEXT NOT NULL DEFAULT 'EUR'");
 }
 
 /*
@@ -255,7 +272,55 @@ if (!userColumns.includes('username')) {
     UPDATE users SET username = lower(substr(email, 1, instr(email, '@') - 1)) WHERE username IS NULL;
   `);
 }
+
+/*
+ * Two people at the two companies - qa@publisher.test and qa@primis.com - back
+ * fill to the same username, and the unique index below then threw on every
+ * boot for ever after. Under `Restart=always` that is a permanent crash loop
+ * with nothing in the UI or the docs to fix it, so the collisions are resolved
+ * here instead: the oldest account keeps the plain name, the others get their
+ * company or their id appended.
+ */
+for (const clash of db
+  .prepare('SELECT username FROM users WHERE username IS NOT NULL GROUP BY username HAVING COUNT(*) > 1')
+  .all()) {
+  const rows = db.prepare('SELECT id, username, company FROM users WHERE username = ? ORDER BY id').all(clash.username);
+  for (const row of rows.slice(1)) {
+    const suffix = String(row.company ?? '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    let candidate = suffix ? `${row.username}-${suffix}` : `${row.username}-${row.id}`;
+    if (db.prepare('SELECT 1 FROM users WHERE username = ? AND id != ?').get(candidate, row.id)) {
+      candidate = `${row.username}-${row.id}`;
+    }
+    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(candidate, row.id);
+    console.warn(`Renamed duplicate username "${row.username}" to "${candidate}" (user ${row.id}).`);
+  }
+}
+
+// A user with no e-mail to derive from would otherwise be NULL, and several
+// NULLs do not collide in SQLite - but they cannot sign in either.
+for (const row of db.prepare('SELECT id FROM users WHERE username IS NULL OR username = ?').all('').concat()) {
+  db.prepare('UPDATE users SET username = ? WHERE id = ?').run(`user-${row.id}`, row.id);
+  console.warn(`User ${row.id} had no username; set to "user-${row.id}".`);
+}
+
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)');
+
+/*
+ * Indexes on columns that only exist after a migration. They cannot live in the
+ * CREATE TABLE block above: `CREATE TABLE IF NOT EXISTS` is a no-op on an
+ * existing table, so an index naming a column that table does not have yet
+ * failed with "no such column" and took the boot down before the migration that
+ * adds it ever ran.
+ */
+db.exec('CREATE INDEX IF NOT EXISTS idx_issues_batch ON issues(batch_id)');
+
+/*
+ * Rows created under the old USD default that nobody has entered a figure for
+ * yet. Leaving them would mean the next number typed into an empty cell is
+ * still read as dollars. Rows that already carry a value are left alone - that
+ * currency was a real choice.
+ */
+db.prepare("UPDATE sites SET rpm_primis_currency = 'EUR' WHERE rpm_primis IS NULL AND rpm_primis_currency = 'USD'").run();
 
 /*
  * The per-site notes field became a discussion thread. Anything already written

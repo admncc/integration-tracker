@@ -12,6 +12,19 @@ sitesRouter.use(requireAuth);
 const statusEnum = z.enum(Object.keys(TRACK_STATUS));
 const openList = OPEN_ISSUE_STATUSES.map(() => '?').join(',');
 
+/** See the note in routes/issues.js: a NUL truncates the value everywhere downstream. */
+const cleanText = (value) =>
+  typeof value === 'string' ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '') : value;
+
+/** A feed-sized excerpt that ends at a word and says it was cut. */
+function excerpt(body, limit = 120) {
+  const text = String(body).trim();
+  if (text.length <= limit) return text;
+  const cut = text.slice(0, limit);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > limit * 0.6 ? cut.slice(0, space) : cut).trimEnd()}...`;
+}
+
 const siteFields = {
   /*
    * The same normaliser the importer uses. Without it "https://www.Foo.de/bar",
@@ -25,7 +38,7 @@ const siteFields = {
     .transform((value) => normaliseDomain(value))
     .refine((value) => value.length > 0, 'That is not a valid domain name'),
   priority: z.coerce.number({ invalid_type_error: 'Priority must be a number' }).int('Priority must be a whole number').min(1, 'Priority must be between 1 and 99').max(99, 'Priority must be between 1 and 99'),
-  test_url: z.string().trim().max(500),
+  test_url: z.preprocess(cleanText, z.string().trim().max(500)),
   status_video: statusEnum,
   status_display: statusEnum,
   status_ads_txt: statusEnum,
@@ -38,7 +51,7 @@ const siteFields = {
   rpm_primis: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number({ invalid_type_error: 'An RPM must be a number' }).min(0, 'An RPM cannot be negative').max(10000, 'An RPM above 10000 looks like a typo').nullable()),
   rpm_previous_currency: z.enum(CURRENCIES),
   rpm_primis_currency: z.enum(CURRENCIES),
-  managed_by: z.string().trim().max(190),
+  managed_by: z.preprocess(cleanText, z.string().trim().max(190)),
   /*
    * A real boolean, not a coerced one. z.coerce.boolean() turns "false" and
    * "0" into true, so the call meant to bring a site back archived it instead.
@@ -121,7 +134,10 @@ sitesRouter.post('/:id/messages', (req, res) => {
 
   const parsed = z
     .object({
-      body: z.string().trim().min(1, 'A message cannot be empty').max(20000, 'That message is too long (max 20000 characters)'),
+      body: z.preprocess(
+        cleanText,
+        z.string().trim().min(1, 'A message cannot be empty').max(20000, 'That message is too long (max 20000 characters)')
+      ),
       reply_to_id: z.coerce.number().int().positive().nullable().optional(),
     })
     .safeParse(req.body);
@@ -152,7 +168,7 @@ sitesRouter.post('/:id/messages', (req, res) => {
     actorId: req.user.id,
     kind: 'message_posted',
     field: String(messageId),
-    newValue: parsed.data.body.slice(0, 120),
+    newValue: excerpt(parsed.data.body),
   });
 
   res.status(201).json({ message: listMessages(id).find((m) => m.id === messageId) });
@@ -199,7 +215,7 @@ sitesRouter.delete('/:id/messages/:messageId', (req, res) => {
       `UPDATE activity SET old_value = new_value, new_value = '(message deleted)'
         WHERE site_id = ? AND kind = 'message_posted' AND field IS NULL
           AND new_value = ? AND actor_id IS ?`
-    ).run(message.site_id, message.body.slice(0, 120), message.author_id);
+    ).run(message.site_id, excerpt(message.body), message.author_id);
   }
 
   logActivity({ siteId: message.site_id, actorId: req.user.id, kind: 'message_deleted', newValue: '(message deleted)' });
@@ -226,7 +242,7 @@ sitesRouter.post('/:id/messages/:messageId/restore', (req, res) => {
       WHERE kind = 'message_posted' AND field = ? AND new_value = '(message deleted)' AND old_value IS NOT NULL`
   ).run(String(message.id));
 
-  logActivity({ siteId: message.site_id, actorId: req.user.id, kind: 'message_restored', newValue: message.body.slice(0, 120) });
+  logActivity({ siteId: message.site_id, actorId: req.user.id, kind: 'message_restored', newValue: excerpt(message.body) });
 
   res.json({ ok: true, message: listMessages(message.site_id).find((m) => m.id === message.id) });
 });

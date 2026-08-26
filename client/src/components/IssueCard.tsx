@@ -5,7 +5,7 @@ import { useSession } from '../lib/session';
 import type { Attachment, Comment, Issue, IssueStatus, User } from '../lib/types';
 import { ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY } from '@shared/domain.js';
 import { FILE_GLYPH, MAX_UPLOAD_BYTES, fileKind, formatBytes, isInlineType } from '@shared/files.js';
-import { Badge, Button, InlineSelect, Timestamp, relativeTime, type Tone } from './ui';
+import { Badge, Button, InlineSelect, Timestamp, localDate, relativeTime, type Tone } from './ui';
 
 /** Mirrors the server-side transition table so the UI never offers a rejected move. */
 const ALLOWED_TRANSITIONS: Record<string, IssueStatus[]> = {
@@ -121,7 +121,12 @@ export default function IssueCard({
   const severity = SEVERITY[issue.severity] as { label: string; tone: Tone };
   const type = ISSUE_TYPE[issue.type] as { label: string; tone: Tone };
   const action = user ? primaryAction(issue.status, user.role) : null;
-  const overdue = Boolean(issue.due_date) && !ISSUE_STATUS[issue.status].terminal && issue.due_date! < new Date().toISOString().slice(0, 10);
+  /*
+   * The reader's own calendar date. Comparing against the UTC date flipped an
+   * issue to overdue up to a day early or late depending on the zone, while the
+   * date itself was picked from a local-calendar date input.
+   */
+  const overdue = Boolean(issue.due_date) && !ISSUE_STATUS[issue.status].terminal && issue.due_date! < localDate();
   const statusOptions = (ALLOWED_TRANSITIONS[user?.role ?? 'partner'] ?? [])
     .map((value) => ({ value, label: ISSUE_STATUS[value].label }));
   const issueAttachments = detail?.attachments.filter((a) => a.comment_id == null) ?? [];
@@ -173,8 +178,29 @@ export default function IssueCard({
             {issue.title}
           </button>
 
+          {/*
+            * The page the defect is on, one click from the issue. Without it
+            * every QA check and every fix cost three navigations - domain link,
+            * site page, test URL, back.
+            */}
+          {issue.test_url && (
+            <a
+              href={issue.test_url}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="mt-1 inline-flex max-w-full items-center gap-1 text-xs text-brand hover:underline"
+              title={issue.test_url}
+            >
+              <span className="truncate">Open test page ↗</span>
+            </a>
+          )}
+
           <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-ink-faint">
-            <span>#{issue.id}</span>
+            {/* The permalink page holds the full audit trail and the sibling
+                issues of a batch, and nothing used to link to it. */}
+            <Link to={`/issues/${issue.id}`} className="hover:text-brand hover:underline" title="Open this issue on its own page">
+              #{issue.id}
+            </Link>
             <span>{ISSUE_CATEGORY[issue.category as keyof typeof ISSUE_CATEGORY] ?? issue.category}</span>
             <span>
               Raised by <span className="text-ink-soft">{issue.reporter_name ?? 'unknown'}</span> · <Timestamp iso={issue.created_at} />
@@ -305,12 +331,17 @@ export default function IssueCard({
               issueId={issue.id}
               comments={detail.comments}
               attachments={detail.attachments}
-              onPosted={(comment, uploaded) => {
+              onPosted={(comment, uploaded, fresh) => {
                 setDetail({
                   comments: [...detail.comments, comment],
                   attachments: [...detail.attachments, ...uploaded],
                 });
-                const merged = { ...issue, comment_count: (issue.comment_count ?? 0) + 1 };
+                /*
+                 * `fresh` carries the issue's new updated_at. Without it the
+                 * card kept the value from before the comment and the next
+                 * status change came back as a 409 blaming a colleague.
+                 */
+                const merged = { ...issue, ...(fresh ?? {}), comment_count: (issue.comment_count ?? 0) + 1 };
                 setIssue(merged);
                 onChanged?.(merged);
               }}
@@ -429,7 +460,7 @@ function Thread({
   issueId: number;
   comments: Comment[];
   attachments: Attachment[];
-  onPosted: (comment: Comment, uploaded: Attachment[]) => void;
+  onPosted: (comment: Comment, uploaded: Attachment[], fresh?: Partial<Issue>) => void;
   onDeleted: () => void;
 }) {
   const [body, setBody] = useState('');
@@ -451,14 +482,20 @@ function Thread({
     setBusy(true);
     setError('');
     try {
-      const { comment } = await api.post<{ comment: Comment }>(`/issues/${issueId}/comments`, {
+      const posted = await api.post<{ comment: Comment; issue?: Issue }>(`/issues/${issueId}/comments`, {
         body: body.trim() || '(attachment only)',
       });
+      const { comment } = posted;
+      // The last write wins for the concurrency token: an upload bumps it again.
+      let fresh: Issue | undefined = posted.issue;
+
       const uploaded: Attachment[] = [];
       for (const file of files) {
-        uploaded.push(await uploadAttachment(issueId, file, comment.id));
+        const result = await uploadAttachment(issueId, file, comment.id);
+        uploaded.push(result.attachment);
+        if (result.issue) fresh = result.issue;
       }
-      onPosted(comment, uploaded);
+      onPosted(comment, uploaded, fresh);
       setBody('');
       setFiles([]);
       if (fileInput.current) fileInput.current.value = '';
@@ -526,7 +563,11 @@ function Thread({
  * One request per file: the raw bytes are the body, the name rides in a header.
  * Any type goes - screenshots, but also ads.txt snippets, tag exports and logs.
  */
-export async function uploadAttachment(issueId: number, file: File, commentId?: number): Promise<Attachment> {
+export async function uploadAttachment(
+  issueId: number,
+  file: File,
+  commentId?: number
+): Promise<{ attachment: Attachment; issue?: Issue }> {
   if (file.size > MAX_UPLOAD_BYTES) {
     throw new Error(`${file.name} is ${formatBytes(file.size)} - the limit is ${formatBytes(MAX_UPLOAD_BYTES)}.`);
   }
@@ -541,5 +582,5 @@ export async function uploadAttachment(issueId: number, file: File, commentId?: 
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(payload.error ?? `Upload failed for ${file.name}`);
-  return payload.attachment as Attachment;
+  return { attachment: payload.attachment as Attachment, issue: payload.issue as Issue | undefined };
 }

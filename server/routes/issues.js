@@ -1,5 +1,5 @@
 import express, { Router } from 'express';
-import { createReadStream } from 'node:fs';
+import { createReadStream, statSync } from 'node:fs';
 import { z } from 'zod';
 import { db, logActivity } from '../lib/db.js';
 import { requireAuth } from '../lib/auth.js';
@@ -12,6 +12,15 @@ issuesRouter.use(requireAuth);
 
 /** One page of results; the response says when it had to cut the list short. */
 const LIST_LIMIT = 500;
+
+/*
+ * Milliseconds, because updated_at is the optimistic-concurrency token.
+ * datetime('now') has one-second resolution, so two saves inside the same
+ * second carried the same token and both passed the check - the dev handing an
+ * issue back and the partner verifying it at the same moment, which is exactly
+ * the case the check exists for.
+ */
+const NOW = "strftime('%Y-%m-%d %H:%M:%f', 'now')";
 
 const typeEnum = z.enum(Object.keys(ISSUE_TYPE));
 const categoryEnum = z.enum(Object.keys(ISSUE_CATEGORY));
@@ -37,9 +46,18 @@ function assigneeError(assigneeId) {
   return null;
 }
 
+/**
+ * Strips control characters. SQLite stores a NUL happily, but every C string it
+ * passes through afterwards stops there, so "null\u0000byte title" came back
+ * as "null" - stored, returned and displayed, with no warning anywhere.
+ */
+const cleanText = (value) =>
+  typeof value === 'string' ? value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '') : value;
+
 const baseIssue = {
-  title: z.string().trim().min(3, 'A title needs at least 3 characters').max(300, 'A title can be at most 300 characters'),
-  description: z.string().trim().max(20000).default(''),
+  title: z
+    .preprocess(cleanText, z.string().trim().min(3, 'A title needs at least 3 characters').max(300, 'A title can be at most 300 characters')),
+  description: z.preprocess(cleanText, z.string().trim().max(20000)).default(''),
   type: typeEnum.default('technical'),
   category: categoryEnum.default('other'),
   severity: severityEnum.default('medium'),
@@ -49,7 +67,13 @@ const baseIssue = {
     .string()
     .trim()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'A due date must look like 2026-08-31')
-    .refine((value) => !Number.isNaN(Date.parse(value)), 'That is not a real date')
+    /*
+     * Date.parse alone accepted 2026-02-30: V8 rolls it forward to March 2, so
+     * the refinement passed and the card then read "Overdue since 2026-02-30",
+     * a date that does not exist. Comparing the round trip catches it.
+     */
+    .refine((value) => new Date(`${value}T00:00:00Z`).toISOString().slice(0, 10) === value, 'That is not a real date')
+    .refine((value) => value >= '2000-01-01' && value <= '2100-12-31', 'That due date is not in this century')
     .nullable()
     .optional()
     .or(z.literal('').transform(() => null)),
@@ -110,11 +134,33 @@ function buildIssueFilter(rawQuery) {
     if (query.archived !== '1') where.push('(i.site_id IS NULL OR s.archived = 0)');
   }
 
+  /*
+   * "What did I raise today?" and "what came in since Friday?" had no answer at
+   * all: the list could not be filtered by who raised an issue or when, and it
+   * has no date sort, so both questions sent people back to a spreadsheet.
+   */
+  if (query.reporter_id) {
+    where.push('i.reporter_id = ?');
+    params.push(query.reporter_id);
+  }
+  if (query.since && /^\d{4}-\d{2}-\d{2}$/.test(String(query.since))) {
+    where.push('i.created_at >= ?');
+    params.push(`${query.since} 00:00:00`);
+  }
+
+  // Unassigned is a real filter value: it is where everything the partner
+  // raises without picking somebody ends up, and nothing could reach it.
+  if (query.assignee_id === 'none') {
+    where.push('i.assignee_id IS NULL');
+  } else if (query.assignee_id) {
+    where.push('i.assignee_id = ?');
+    params.push(query.assignee_id);
+  }
+
   for (const [param, column] of [
     ['type', 'i.type'],
     ['severity', 'i.severity'],
     ['category', 'i.category'],
-    ['assignee_id', 'i.assignee_id'],
     ['batch_id', 'i.batch_id'],
   ]) {
     if (query[param]) {
@@ -139,7 +185,7 @@ issuesRouter.get('/', (req, res) => {
 
   const issues = db
     .prepare(
-      `SELECT i.*, s.domain, s.priority AS site_priority,
+      `SELECT i.*, s.domain, s.test_url, s.priority AS site_priority,
               r.name AS reporter_name, a.name AS assignee_name, d.name AS deleted_by_name,
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comment_count,
               (SELECT COUNT(*) FROM activity ac WHERE ac.issue_id = i.id AND ac.field = 'status' AND ac.new_value = 'ready_for_qa') AS qa_rounds
@@ -174,11 +220,14 @@ issuesRouter.get('/export.csv', (req, res) => {
 
   const rows = db
     .prepare(
-      `SELECT i.id, i.site_id, s.domain, s.priority, i.type, i.category, i.severity, i.status, i.title,
+      `SELECT i.id, i.site_id, s.domain, s.priority, s.test_url, i.type, i.category, i.severity, i.status, i.title,
               r.name AS reporter, a.name AS assignee, i.due_date, i.created_at, i.updated_at, i.closed_at,
               i.deleted_at, d.name AS deleted_by,
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comments,
-              (SELECT COUNT(*) FROM attachments at WHERE at.issue_id = i.id) AS attachments
+              (SELECT COUNT(*) FROM attachments at WHERE at.issue_id = i.id) AS attachments,
+              -- How often this went back for a re-check. It is the answer to
+              -- "which finding keeps bouncing", which the export could not give.
+              (SELECT COUNT(*) FROM activity ac WHERE ac.issue_id = i.id AND ac.field = 'status' AND ac.new_value = 'ready_for_qa') AS qa_rounds
          FROM issues i
          LEFT JOIN sites s ON s.id = i.site_id
          LEFT JOIN users r ON r.id = i.reporter_id
@@ -190,19 +239,19 @@ issuesRouter.get('/export.csv', (req, res) => {
     .all(...params);
 
   const header = [
-    'ID', 'Domain', 'Prio', 'Type', 'Category', 'Severity', 'Status', 'Title',
+    'ID', 'Domain', 'Prio', 'Test URL', 'Type', 'Category', 'Severity', 'Status', 'Title',
     'Raised by', 'Assignee', 'Due', 'Created', 'Updated', 'Closed', 'Deleted', 'Deleted by',
-    'Comments', 'Attachments',
+    'Comments', 'Attachments', 'QA rounds',
   ];
   const body = rows.map((row) => [
-    row.id, row.domain ?? 'All domains (network-wide)', row.site_id == null ? '' : row.priority,
+    row.id, row.domain ?? 'All domains (network-wide)', row.site_id == null ? '' : row.priority, row.test_url ?? '',
     ISSUE_TYPE[row.type]?.label ?? row.type,
     ISSUE_CATEGORY[row.category] ?? row.category,
     SEVERITY[row.severity]?.label ?? row.severity,
     ISSUE_STATUS[row.status]?.label ?? row.status,
     row.title, row.reporter ?? '', row.assignee ?? '', row.due_date ?? '',
-    row.created_at, row.updated_at, row.closed_at ?? '', row.deleted_at ?? '', row.deleted_by ?? '',
-    row.comments, row.attachments,
+    row.created_at, String(row.updated_at).slice(0, 19), row.closed_at ?? '', row.deleted_at ?? '', row.deleted_by ?? '',
+    row.comments, row.attachments, row.qa_rounds,
   ]);
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -435,13 +484,20 @@ issuesRouter.patch('/:id', (req, res) => {
 
   const extra = [];
   if (data.status && data.status !== issue.status) {
-    extra.push(`resolved_at = ${data.status === 'ready_for_qa' ? "datetime('now')" : 'resolved_at'}`);
+    /*
+     * resolved_at is "when the work stopped", so a terminal status sets it too.
+     * It used to be set only on the hand-back to QA, so an issue an admin took
+     * straight from open to verified had no resolved_at at all and its time to
+     * fix was unrecoverable.
+     */
+    const resolving = data.status === 'ready_for_qa' || ISSUE_STATUS[data.status].terminal;
+    extra.push(`resolved_at = ${resolving ? "COALESCE(resolved_at, datetime('now'))" : 'resolved_at'}`);
     extra.push(`closed_at = ${ISSUE_STATUS[data.status].terminal ? "datetime('now')" : 'NULL'}`);
   }
 
   db.prepare(
     `UPDATE issues SET ${updates.map(([f]) => `${f} = ?`).join(', ')}${extra.length ? `, ${extra.join(', ')}` : ''},
-            updated_at = datetime('now') WHERE id = ?`
+            updated_at = ${NOW} WHERE id = ?`
   ).run(...updates.map(([field, v]) => normalise(v, field)), id);
 
   for (const [field, value] of updates) {
@@ -462,18 +518,26 @@ issuesRouter.post('/:id/comments', (req, res) => {
 
   if (issue.deleted_at) return res.status(409).json({ error: 'This issue is deleted. Restore it first.' });
 
-  const parsed = z.object({ body: z.string().trim().min(1).max(20000) }).safeParse(req.body);
+  const parsed = z.object({ body: z.preprocess(cleanText, z.string().trim().min(1).max(20000)) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Comment cannot be empty' });
 
   const commentId = Number(
     db.prepare('INSERT INTO comments (issue_id, author_id, body) VALUES (?, ?, ?)').run(id, req.user.id, parsed.data.body).lastInsertRowid
   );
-  db.prepare("UPDATE issues SET updated_at = datetime('now') WHERE id = ?").run(id);
+  db.prepare(`UPDATE issues SET updated_at = ${NOW} WHERE id = ?`).run(id);
 
+  /*
+   * The refreshed issue travels back with the comment. Posting one bumps
+   * updated_at, so a card that kept its old copy sent a stale
+   * expected_updated_at on the very next status change and was told "somebody
+   * else changed this issue" - about itself, during the normal loop of
+   * explaining a fix and then handing it back.
+   */
   res.status(201).json({
     comment: db
       .prepare(`SELECT c.*, u.name AS author_name, u.role AS author_role FROM comments c LEFT JOIN users u ON u.id = c.author_id WHERE c.id = ?`)
       .get(commentId),
+    issue: issueRow(id),
   });
 });
 
@@ -529,7 +593,7 @@ issuesRouter.post(
         .run(id, commentId, req.user.id, filename, mime, req.body.length, key).lastInsertRowid
     );
 
-    db.prepare("UPDATE issues SET updated_at = datetime('now') WHERE id = ?").run(id);
+    db.prepare(`UPDATE issues SET updated_at = ${NOW} WHERE id = ?`).run(id);
     logActivity({ siteId: issue.site_id, issueId: id, actorId: req.user.id, kind: 'attachment_added', newValue: filename });
 
     res.status(201).json({
@@ -537,6 +601,8 @@ issuesRouter.post(
         .prepare(`SELECT a.id, a.issue_id, a.comment_id, a.uploader_id, a.filename, a.mime, a.size, a.created_at, u.name AS uploader_name
                     FROM attachments a LEFT JOIN users u ON u.id = a.uploader_id WHERE a.id = ?`)
         .get(attachmentId),
+      // An upload bumps updated_at too - the card needs the new token.
+      issue: issueRow(id),
     });
   }
 );
@@ -544,6 +610,24 @@ issuesRouter.post(
 issuesRouter.get('/attachments/:attachmentId/raw', (req, res) => {
   const attachment = db.prepare('SELECT * FROM attachments WHERE id = ?').get(Number(req.params.attachmentId));
   if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
+
+  /*
+   * Everything that can fail is settled before a single header is written.
+   *
+   * The old order set Content-Type, Content-Length and Content-Disposition
+   * first and only then opened the file, so a missing file produced a 404 that
+   * promised 86 bytes and delivered none - the browser held the connection for
+   * six seconds and reported ERR_CONTENT_LENGTH_MISMATCH, and a tampered
+   * storage key threw a 500 that went out labelled image/png.
+   */
+  let path;
+  let size;
+  try {
+    path = uploadPath(attachment.storage_key);
+    size = statSync(path).size;
+  } catch {
+    return res.status(404).json({ error: 'That file is no longer on disk' });
+  }
 
   /*
    * Only a raster image may render in place. Anything else - an SVG, an HTML
@@ -555,7 +639,10 @@ issuesRouter.get('/attachments/:attachmentId/raw', (req, res) => {
    */
   const inline = isInlineType(attachment.mime);
   res.setHeader('Content-Type', inline ? attachment.mime : 'application/octet-stream');
-  res.setHeader('Content-Length', attachment.size);
+  // The length of what is actually there, not what the row remembers: a file
+  // truncated behind the app's back used to stall the connection for six
+  // seconds and then drop it.
+  res.setHeader('Content-Length', size);
   res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
@@ -566,8 +653,10 @@ issuesRouter.get('/attachments/:attachmentId/raw', (req, res) => {
     `${inline ? 'inline' : 'attachment'}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`
   );
 
-  createReadStream(uploadPath(attachment.storage_key))
-    .on('error', () => res.status(404).end())
+  createReadStream(path)
+    // Headers are already out by now, so there is no status left to send:
+    // ending the response is the only honest thing to do.
+    .on('error', () => res.end())
     .pipe(res);
 });
 
@@ -597,7 +686,7 @@ issuesRouter.delete('/:id', (req, res) => {
     return res.status(403).json({ error: 'Only the reporter or an admin can delete an issue' });
   }
 
-  db.prepare("UPDATE issues SET deleted_at = datetime('now'), deleted_by = ?, updated_at = datetime('now') WHERE id = ?").run(req.user.id, id);
+  db.prepare(`UPDATE issues SET deleted_at = datetime('now'), deleted_by = ?, updated_at = ${NOW} WHERE id = ?`).run(req.user.id, id);
   logActivity({ siteId: issue.site_id, issueId: id, actorId: req.user.id, kind: 'issue_deleted', newValue: issue.title });
 
   res.json({ ok: true, issue: issueRow(id) });
@@ -612,7 +701,7 @@ issuesRouter.post('/:id/restore', (req, res) => {
     return res.status(403).json({ error: 'Only the reporter, whoever deleted it, or an admin can restore an issue' });
   }
 
-  db.prepare("UPDATE issues SET deleted_at = NULL, deleted_by = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+  db.prepare(`UPDATE issues SET deleted_at = NULL, deleted_by = NULL, updated_at = ${NOW} WHERE id = ?`).run(id);
   logActivity({ siteId: issue.site_id, issueId: id, actorId: req.user.id, kind: 'issue_restored', newValue: issue.title });
 
   res.json({ ok: true, issue: issueRow(id) });

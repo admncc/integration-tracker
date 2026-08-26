@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
+import { useSession } from '../lib/session';
 import type { Issue, Site, User } from '../lib/types';
 import { ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY } from '@shared/domain.js';
-import { Button, Empty, Spinner } from '../components/ui';
+import { Button, Empty, Spinner, localDate } from '../components/ui';
 import IssueCard from '../components/IssueCard';
 import IssueModal from '../components/IssueModal';
 
@@ -27,13 +28,59 @@ const FILTERS = [
   { key: 'category', label: 'Category', options: Object.entries(ISSUE_CATEGORY) as [string, string][] },
 ] as const;
 
+/**
+ * Does this issue still belong in the view the filter bar describes?
+ *
+ * The check used to look only at the deleted flag, so verifying the partner's
+ * last re-check left the card sitting in a `status=ready_for_qa` list reading
+ * "Verified" - the queue never emptied, and the dashboard disagreed with it.
+ */
+function matchesView(issue: Issue, params: URLSearchParams): boolean {
+  const status = params.get('status') ?? 'open';
+
+  if (status === 'deleted') return Boolean(issue.deleted_at);
+  if (issue.deleted_at) return false;
+  if (status === 'open' && ISSUE_STATUS[issue.status].terminal) return false;
+  if (status !== 'open' && status !== 'all' && issue.status !== status) return false;
+
+  for (const [key, value] of [
+    ['type', issue.type],
+    ['severity', issue.severity],
+    ['category', issue.category],
+  ] as const) {
+    const wanted = params.get(key);
+    if (wanted && wanted !== value) return false;
+  }
+
+  const assignee = params.get('assignee_id');
+  if (assignee === 'none' && issue.assignee_id != null) return false;
+  if (assignee && assignee !== 'none' && String(issue.assignee_id ?? '') !== assignee) return false;
+
+  const site = params.get('site_id');
+  if (site === 'network' && issue.site_id != null) return false;
+  if (site === 'per_site' && issue.site_id == null) return false;
+  if (site && site !== 'network' && site !== 'per_site' && String(issue.site_id ?? '') !== site) return false;
+
+  return true;
+}
+
+/** A local calendar date N days back, which is what "since Friday" means to a reader. */
+function daysAgo(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return localDate(date);
+}
+
 export default function Issues() {
+  const { user } = useSession();
   const [params, setParams] = useSearchParams();
   const [issues, setIssues] = useState<Issue[]>([]);
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [sites, setSites] = useState<Site[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  /** Everyone who can raise an issue - the partner included, unlike `users`. */
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [composing, setComposing] = useState(false);
   const [notice, setNotice] = useState('');
@@ -87,7 +134,10 @@ export default function Issues() {
 
   useEffect(() => {
     api.get<{ sites: Site[] }>('/sites?archived=1').then((r) => setSites(r.sites));
-    api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0)));
+    api.get<{ users: User[] }>('/users').then((r) => {
+      setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0));
+      setAllUsers(r.users);
+    });
   }, []);
 
   function setFilter(key: string, value: string) {
@@ -191,8 +241,36 @@ export default function Issues() {
         </label>
 
         <label className="text-xs">
+          <span className="mb-1 block text-ink-faint">Raised by</span>
+          <select className="field !w-auto !py-1" value={params.get('reporter_id') ?? ''} onChange={(event) => setFilter('reporter_id', event.target.value)}>
+            <option value="">Anyone</option>
+            {user && <option value={user.id}>Me ({user.name})</option>}
+            {allUsers
+              .filter((candidate) => candidate.id !== user?.id)
+              .map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name}
+                </option>
+              ))}
+          </select>
+        </label>
+
+        <label className="text-xs">
+          <span className="mb-1 block text-ink-faint">Raised</span>
+          <select className="field !w-auto !py-1" value={params.get('since') ?? ''} onChange={(event) => setFilter('since', event.target.value)}>
+            <option value="">Any time</option>
+            <option value={daysAgo(0)}>Today</option>
+            <option value={daysAgo(1)}>Since yesterday</option>
+            <option value={daysAgo(7)}>Last 7 days</option>
+            <option value={daysAgo(30)}>Last 30 days</option>
+          </select>
+        </label>
+
+        <label className="text-xs">
           <span className="mb-1 block text-ink-faint">Assignee</span>
           <select className="field !w-auto !py-1" value={params.get('assignee_id') ?? ''} onChange={(event) => setFilter('assignee_id', event.target.value)}>
+            {/* Everything the partner raises without picking someone lands here. */}
+            <option value="none">Unassigned</option>
             <option value="">Anyone</option>
             {users.map((user) => (
               <option key={user.id} value={user.id}>{user.name}</option>
@@ -222,15 +300,11 @@ export default function Issues() {
               users={users}
               showDomain
               onChanged={(updated) =>
-                setIssues((current) => {
-                  // A card that no longer matches the active view leaves the list
-                  // instead of sitting there contradicting the header count.
-                  const viewingDeleted = params.get('status') === 'deleted';
-                  if (Boolean(updated.deleted_at) !== viewingDeleted && params.get('status') !== 'all') {
-                    return current.filter((i) => i.id !== updated.id);
-                  }
-                  return current.map((i) => (i.id === updated.id ? { ...i, ...updated } : i));
-                })
+                setIssues((current) =>
+                  matchesView(updated, params)
+                    ? current.map((i) => (i.id === updated.id ? { ...i, ...updated } : i))
+                    : current.filter((i) => i.id !== updated.id)
+                )
               }
             />
           ))}

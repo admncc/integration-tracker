@@ -95,12 +95,18 @@ metaRouter.get('/stats', (_req, res) => {
     .prepare('SELECT COUNT(*) AS n FROM sites WHERE archived = 0 AND (rpm_previous IS NULL OR rpm_primis IS NULL)')
     .get().n;
 
+  /*
+   * The feed carries the issue's title as well as the domain. It used to read
+   * "Dev Team moved In progress on sky-flight.de" - with four open issues on
+   * that domain, nobody could tell which one had moved.
+   */
   const recent = db
     .prepare(
-      `SELECT ac.*, u.name AS actor_name, s.domain
+      `SELECT ac.*, u.name AS actor_name, s.domain, i.title AS issue_title
          FROM activity ac
          LEFT JOIN users u ON u.id = ac.actor_id
          LEFT JOIN sites s ON s.id = ac.site_id
+         LEFT JOIN issues i ON i.id = ac.issue_id
         ORDER BY ac.id DESC LIMIT 25`
     )
     .all();

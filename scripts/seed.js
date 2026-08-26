@@ -359,7 +359,7 @@ seedBatch({
 seedBatch({
   title: 'Add the TheMoneytizer Page RPM benchmark to the tracker',
   description:
-    'Primis needs a rough Page RPM benchmark per site to steer optimization. Enter the RPM you were seeing with TheMoneytizer in the "RPM target" column so both sides can measure against the same number.',
+    'Primis needs a rough Page RPM benchmark per site to steer optimization. Enter the RPM you were seeing with TheMoneytizer in the "Previous Session RPM" column so both sides can measure against the same number.',
   type: 'revenue',
   category: 'performance',
   severity: 'medium',

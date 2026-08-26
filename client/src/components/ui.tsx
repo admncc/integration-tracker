@@ -306,12 +306,33 @@ export function formatDateTime(iso: string) {
   });
 }
 
+/**
+ * The same instant with its zone named.
+ *
+ * Times render in the reader's own zone, so the publisher in Berlin and the
+ * partner elsewhere read different clock times off the same "unambiguous"
+ * record - and the two 01:30s on the night the clocks go back were
+ * indistinguishable. The tooltip says which zone, and seconds settle the rest.
+ */
+export function formatDateTimeExact(iso: string) {
+  return parseTimestamp(iso).toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    timeZoneName: 'short',
+  });
+}
+
 export function Timestamp({ iso, className = '' }: { iso: string; className?: string }) {
   return (
-    <time dateTime={parseTimestamp(iso).toISOString()} title={formatDateTime(iso)} className={className}>
+    <time dateTime={parseTimestamp(iso).toISOString()} title={formatDateTimeExact(iso)} className={className}>
       {formatDateTime(iso)}
     </time>
   );
+}
+
+/** Today, in the reader's own calendar - which is what a due date means to them. */
+export function localDate(date = new Date()) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
 export function relativeTime(iso: string) {

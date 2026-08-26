@@ -107,6 +107,7 @@ export interface ActivityEntry {
   issue_id: number | null;
   actor_name: string | null;
   domain?: string | null;
+  issue_title?: string | null;
   kind: string;
   field: string | null;
   old_value: string | null;

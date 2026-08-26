@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
@@ -123,6 +123,9 @@ export default function Sites() {
   // Hiding the revenue columns beats rendering "N..." where "New" and "None"
   // become indistinguishable; the figures are still on each domain's page.
   const [width, setWidth] = useState(() => window.innerWidth);
+  /** Newest save wins per cell, so a slow response cannot undo a later edit. */
+  const saveTickets = useRef(new Map<string, number>());
+  const [saving, setSaving] = useState<Set<string>>(new Set());
   useEffect(() => {
     const onResize = () => setWidth(window.innerWidth);
     window.addEventListener('resize', onResize);
@@ -159,7 +162,20 @@ export default function Sites() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  /** Optimistic cell edit - the row snaps back if the API rejects the change. */
+  /**
+   * Optimistic cell edit.
+   *
+   * Two things this has to get right, both of which it used to get wrong on a
+   * slow connection:
+   *
+   *  - a response that arrives late must not overwrite a newer edit of the same
+   *    cell. Every save gets a sequence number and only the newest one for that
+   *    cell is allowed to write back;
+   *  - a failure must revert that one cell, not the whole table. It used to
+   *    snapshot the entire list and restore it, so a rejected edit on row A
+   *    also wiped a successful edit on row B off the screen while the server
+   *    kept it.
+   */
   async function patchSite(site: Site, field: string, raw: string) {
     // Only the amounts are numeric - `rpm_*_currency` is a code and must stay a string.
     const numeric = field === 'priority' || field === 'rpm_previous' || field === 'rpm_primis';
@@ -178,14 +194,32 @@ export default function Sites() {
         value = parsed;
       }
     }
-    const previous = sites;
+
+    const cell = `${site.id}:${field}`;
+    const ticket = (saveTickets.current.get(cell) ?? 0) + 1;
+    saveTickets.current.set(cell, ticket);
+    const stale = () => saveTickets.current.get(cell) !== ticket;
+
+    const before = site[field as keyof Site];
     setSites((current) => current.map((s) => (s.id === site.id ? { ...s, [field]: value } : s)));
+    setSaving((current) => new Set(current).add(cell));
+
     try {
       const { site: saved } = await api.patch<{ site: Site }>(`/sites/${site.id}`, { [field]: value });
+      if (stale()) return;
       setSites((current) => current.map((s) => (s.id === site.id ? { ...s, ...saved } : s)));
     } catch (err) {
-      setSites(previous);
+      if (stale()) return;
+      setSites((current) => current.map((s) => (s.id === site.id ? { ...s, [field]: before } : s)));
       setNotice({ tone: 'red', text: err instanceof Error ? err.message : 'Could not save' });
+    } finally {
+      if (!stale()) {
+        setSaving((current) => {
+          const next = new Set(current);
+          next.delete(cell);
+          return next;
+        });
+      }
     }
   }
 
@@ -420,20 +454,29 @@ export default function Sites() {
                   <input type="checkbox" aria-label={`Select ${site.domain}`} checked={selected.has(site.id)} onChange={() => toggleRow(site.id)} />
                 </td>
 
-                {columns.map((column) => (
-                  <td
-                    key={column.key}
-                    className="overflow-hidden px-2 py-1.5 align-middle"
-                  >
-                    <Cell
-                      site={site}
-                      column={column}
-                      disabled={readOnly(column.key)}
-                      eurUsd={eurUsd}
-                      onCommit={(field, value) => patchSite(site, field, value)}
-                    />
-                  </td>
-                ))}
+                {columns.map((column) => {
+                  /*
+                   * A save in flight is visible. Without it a request that never
+                   * came back looked exactly like a saved value, and the cell
+                   * quietly held something the server had never seen.
+                   */
+                  const inFlight = saving.has(`${site.id}:${column.key}`);
+                  return (
+                    <td
+                      key={column.key}
+                      className={`overflow-hidden px-2 py-1.5 align-middle transition-opacity ${inFlight ? 'opacity-50' : ''}`}
+                      title={inFlight ? 'Saving...' : undefined}
+                    >
+                      <Cell
+                        site={site}
+                        column={column}
+                        disabled={readOnly(column.key)}
+                        eurUsd={eurUsd}
+                        onCommit={(field, value) => patchSite(site, field, value)}
+                      />
+                    </td>
+                  );
+                })}
 
               </tr>
             ))}
