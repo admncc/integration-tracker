@@ -23,7 +23,7 @@ export const ALLOWED_MIME = Object.keys(EXTENSION_BY_MIME);
 
 /**
  * Writes a buffer under a random key. The client-supplied filename is kept for
- * display only — it never touches the path, so it cannot escape UPLOAD_DIR.
+ * display only - it never touches the path, so it cannot escape UPLOAD_DIR.
  */
 export function storeUpload(buffer, mime) {
   const extension = EXTENSION_BY_MIME[mime];

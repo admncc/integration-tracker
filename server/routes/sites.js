@@ -42,7 +42,8 @@ function listSites({ includeArchived = false } = {}) {
       `SELECT s.*,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.status IN (${openList})) AS open_issues,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.status = 'ready_for_qa')  AS awaiting_qa,
-              (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id) AS total_issues
+              (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id) AS total_issues,
+              (SELECT COUNT(*) FROM site_messages m WHERE m.site_id = s.id) AS message_count
          FROM sites s
         WHERE (? = 1 OR s.archived = 0)
         ORDER BY s.priority ASC, s.domain ASC`
@@ -82,8 +83,69 @@ sitesRouter.get('/:id', (req, res) => {
     )
     .all(site.id);
 
-  res.json({ site, issues, activity });
+  res.json({ site, issues, activity, messages: listMessages(site.id) });
 });
+
+/** The per-domain discussion: anyone signed in can post, and reply to a post. */
+sitesRouter.post('/:id/messages', (req, res) => {
+  const id = Number(req.params.id);
+  if (!db.prepare('SELECT 1 FROM sites WHERE id = ?').get(id)) return res.status(404).json({ error: 'Site not found' });
+
+  const parsed = z
+    .object({
+      body: z.string().trim().min(1).max(20000),
+      reply_to_id: z.coerce.number().int().positive().nullable().optional(),
+    })
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'A message cannot be empty' });
+
+  let replyTo = null;
+  if (parsed.data.reply_to_id) {
+    const parent = db.prepare('SELECT id FROM site_messages WHERE id = ? AND site_id = ?').get(parsed.data.reply_to_id, id);
+    if (!parent) return res.status(400).json({ error: 'That message belongs to another site' });
+    replyTo = parent.id;
+  }
+
+  const messageId = Number(
+    db
+      .prepare('INSERT INTO site_messages (site_id, author_id, reply_to_id, body) VALUES (?, ?, ?, ?)')
+      .run(id, req.user.id, replyTo, parsed.data.body).lastInsertRowid
+  );
+
+  // Goes on the audit trail so a new question surfaces in the activity feed.
+  logActivity({ siteId: id, actorId: req.user.id, kind: 'message_posted', newValue: parsed.data.body.slice(0, 120) });
+
+  res.status(201).json({ message: listMessages(id).find((m) => m.id === messageId) });
+});
+
+sitesRouter.delete('/:id/messages/:messageId', (req, res) => {
+  const message = db
+    .prepare('SELECT * FROM site_messages WHERE id = ? AND site_id = ?')
+    .get(Number(req.params.messageId), Number(req.params.id));
+  if (!message) return res.status(404).json({ error: 'Message not found' });
+  if (req.user.role !== 'admin' && message.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Only the author or an admin can delete a message' });
+  }
+
+  db.prepare('DELETE FROM site_messages WHERE id = ?').run(message.id);
+  res.json({ ok: true });
+});
+
+function listMessages(siteId) {
+  return db
+    .prepare(
+      `SELECT m.id, m.site_id, m.author_id, m.reply_to_id, m.body, m.created_at,
+              u.name AS author_name, u.role AS author_role,
+              p.body AS reply_to_body, pu.name AS reply_to_author
+         FROM site_messages m
+         LEFT JOIN users u ON u.id = m.author_id
+         LEFT JOIN site_messages p ON p.id = m.reply_to_id
+         LEFT JOIN users pu ON pu.id = p.author_id
+        WHERE m.site_id = ?
+        ORDER BY m.id ASC`
+    )
+    .all(siteId);
+}
 
 sitesRouter.post('/', requireRole('admin', 'dev'), (req, res) => {
   const parsed = createSchema.safeParse(req.body);
@@ -139,7 +201,7 @@ sitesRouter.delete('/:id', requireRole('admin'), (req, res) => {
   const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(id);
   if (!site) return res.status(404).json({ error: 'Site not found' });
 
-  // Rows cascade, files do not — collect the storage keys before they disappear.
+  // Rows cascade, files do not - collect the storage keys before they disappear.
   const keys = db
     .prepare('SELECT a.storage_key FROM attachments a JOIN issues i ON i.id = a.issue_id WHERE i.site_id = ?')
     .all(id)

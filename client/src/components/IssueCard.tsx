@@ -16,12 +16,12 @@ const ALLOWED_TRANSITIONS: Record<string, IssueStatus[]> = {
 /** The single obvious next step per role, surfaced as a button next to the dropdown. */
 function primaryAction(status: IssueStatus, role: string): { next: IssueStatus; label: string } | null {
   if (role === 'partner') {
-    if (status === 'ready_for_qa') return { next: 'verified', label: 'Verified — close it' };
+    if (status === 'ready_for_qa') return { next: 'verified', label: 'Verified - close it' };
     if (status === 'verified') return { next: 'open', label: 'Reopen' };
     return null;
   }
   if (status === 'open') return { next: 'in_progress', label: 'Start working' };
-  if (status === 'in_progress') return { next: 'ready_for_qa', label: 'Fixed — ask for re-check' };
+  if (status === 'in_progress') return { next: 'ready_for_qa', label: 'Fixed - ask for re-check' };
   if (status === 'ready_for_qa' && role === 'admin') return { next: 'verified', label: 'Verify' };
   return null;
 }
@@ -325,7 +325,7 @@ function Thread({
       <form onSubmit={submit} className="space-y-2 rounded-lg border border-line bg-surface p-3">
         <textarea
           className="field min-h-20"
-          placeholder="Add a comment — what you changed, what still fails, what you need…"
+          placeholder="Add a comment - what you changed, what still fails, what you need…"
           value={body}
           onChange={(event) => setBody(event.target.value)}
         />

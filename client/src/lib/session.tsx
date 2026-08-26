@@ -56,7 +56,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     await api.post<{ user: User }>('/auth/login', { identifier, password });
 
     /*
-     * The credentials were right, but that only means the server issued a cookie —
+     * The credentials were right, but that only means the server issued a cookie -
      * the browser may still have refused to keep it. Confirm the session actually
      * exists before showing the app, otherwise every page loads empty with no
      * explanation of why.
@@ -64,7 +64,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const { user: confirmed } = await api.get<{ user: User | null }>('/auth/me');
     if (!confirmed) {
       throw new Error(
-        'Signed in, but your browser did not keep the session cookie. This happens when the tracker is served over plain HTTP — use HTTPS, or set INSECURE_COOKIES=1 on the server for testing.'
+        'Signed in, but your browser did not keep the session cookie. This happens when the tracker is served over plain HTTP - use HTTPS, or set INSECURE_COOKIES=1 on the server for testing.'
       );
     }
     setUser(confirmed);

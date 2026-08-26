@@ -53,7 +53,7 @@ authRouter.post('/login', (req, res) => {
   const { identifier, password } = parsed.data;
   const key = throttleKey(req, identifier);
   if (tooManyAttempts(key)) {
-    return res.status(429).json({ error: 'Too many failed attempts — try again in 15 minutes' });
+    return res.status(429).json({ error: 'Too many failed attempts - try again in 15 minutes' });
   }
 
   const row = db.prepare('SELECT * FROM users WHERE (username = ? OR lower(email) = ?) AND active = 1').get(identifier, identifier);

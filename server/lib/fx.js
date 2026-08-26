@@ -33,7 +33,7 @@ export function fxState() {
 }
 
 /**
- * Pulls the current USD reference rate. Returns `{ ok, rate, date }` — a failure
+ * Pulls the current USD reference rate. Returns `{ ok, rate, date }` - a failure
  * is reported, never thrown, so a network blip leaves the last known rate in place.
  */
 export async function fetchEcbRate() {

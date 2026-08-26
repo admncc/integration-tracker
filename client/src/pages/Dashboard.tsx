@@ -162,7 +162,15 @@ export default function Dashboard() {
               <li key={entry.id} className="border-l border-line pl-3 text-xs">
                 <div className="text-ink-soft">
                   <span className="font-medium text-ink">{entry.actor_name ?? 'System'}</span>{' '}
-                  {entry.kind === 'issue_created' ? 'raised' : entry.kind === 'issue_status' ? 'moved' : entry.kind === 'attachment_added' ? 'attached' : 'changed'}{' '}
+                  {entry.kind === 'issue_created'
+                    ? 'raised'
+                    : entry.kind === 'issue_status'
+                      ? 'moved'
+                      : entry.kind === 'attachment_added'
+                        ? 'attached'
+                        : entry.kind === 'message_posted'
+                          ? 'wrote'
+                          : 'changed'}{' '}
                   {entry.kind === 'issue_status' ? (ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value) : entry.new_value ?? entry.field}
                   {entry.domain && (
                     <>
@@ -187,7 +195,7 @@ export default function Dashboard() {
 function Metric({ label, value, tone }: { label: string; value: string; tone?: Tone }) {
   return (
     <div className="rounded-lg bg-raised px-3 py-2">
-      <div className={`text-lg font-semibold tabular-nums ${tone ? TONE_TEXT[tone] : ''}`}>{value || '—'}</div>
+      <div className={`text-lg font-semibold tabular-nums ${tone ? TONE_TEXT[tone] : ''}`}>{value || '-'}</div>
       <div className="text-xs text-ink-soft">{label}</div>
     </div>
   );

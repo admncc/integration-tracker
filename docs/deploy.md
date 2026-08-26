@@ -91,7 +91,7 @@ Logs: `sudo journalctl -u integration-tracker -f`
 
 ## 6. nginx and a certificate
 
-Point an A record for your subdomain at the server first — certbot verifies
+Point an A record for your subdomain at the server first - certbot verifies
 over HTTP and fails if DNS has not propagated.
 
 ```bash
@@ -110,7 +110,7 @@ Certbot renews on its own via a systemd timer.
 
 ### Firewall
 
-If ufw is active, the Node port must stay closed to the outside — only nginx
+If ufw is active, the Node port must stay closed to the outside - only nginx
 should reach it:
 
 ```bash
@@ -128,7 +128,7 @@ Open `https://tracker.example.com`, sign in as `admin` with the password from
 2. Settings → create an account for each developer and for the Primis contacts.
 3. Settings → disable the seeded `dev`, `dev-extern` and `primis-qa` accounts, or
    set fresh passwords on them.
-4. Settings → check the EUR/USD rate says "European Central Bank" — that
+4. Settings → check the EUR/USD rate says "European Central Bank" - that
    confirms the server can reach the outside world.
 
 Only then send the link to the partner.
@@ -166,7 +166,7 @@ everything you have edited alone. Take a backup before an update anyway.
 | Symptom | Cause |
 | --- | --- |
 | `node -v` shows v18 or v20 | NodeSource step did not take; the app will not start |
-| Service restarts in a loop | `journalctl -u integration-tracker -n 50` — usually a bad `.env` line or `data/` not writable by `tracker` |
+| Service restarts in a loop | `journalctl -u integration-tracker -n 50` - usually a bad `.env` line or `data/` not writable by `tracker` |
 | 502 from nginx | the service is down, or `PORT` in `.env` does not match `proxy_pass` |
 | 413 when uploading a screenshot | `client_max_body_size` missing from the nginx server block |
 | Sign-in says "too many attempts" for everyone | `TRUST_PROXY=1` missing from `.env` |

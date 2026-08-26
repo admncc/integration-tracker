@@ -98,7 +98,7 @@ export default function IssueModal({
     >
       <form onSubmit={submit} className="space-y-3">
         {selectableSites && (
-          <Field label="Affected domains" hint="Tick every domain showing this problem — each one becomes its own tickable item.">
+          <Field label="Affected domains" hint="Tick every domain showing this problem - each one becomes its own tickable item.">
             <div className="space-y-2">
               <input
                 className="field"
@@ -148,7 +148,7 @@ export default function IssueModal({
           />
         </Field>
 
-        <Field label="Description" hint="Steps, tag IDs, screenshots links — everything that used to live in the mail thread.">
+        <Field label="Description" hint="Steps, tag IDs, screenshots links - everything that used to live in the mail thread.">
           <textarea
             className="field min-h-32"
             value={form.description}
@@ -221,7 +221,7 @@ export default function IssueModal({
           </Field>
         </div>
 
-        <Field label="Screenshots" hint="PNG, JPEG, GIF, WebP or AVIF — up to 10 MB each.">
+        <Field label="Screenshots" hint="PNG, JPEG, GIF, WebP or AVIF - up to 10 MB each.">
           <div className="flex flex-wrap items-center gap-2">
             <input
               ref={fileInput}

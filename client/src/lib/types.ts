@@ -42,6 +42,20 @@ export interface Site {
   open_issues?: number;
   awaiting_qa?: number;
   total_issues?: number;
+  message_count?: number;
+}
+
+export interface SiteMessage {
+  id: number;
+  site_id: number;
+  author_id: number | null;
+  author_name: string | null;
+  author_role: Role | null;
+  reply_to_id: number | null;
+  reply_to_body: string | null;
+  reply_to_author: string | null;
+  body: string;
+  created_at: string;
 }
 
 export interface Issue {

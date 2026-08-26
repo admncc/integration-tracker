@@ -117,7 +117,7 @@ const upsertSite = db.prepare(`
   ON CONFLICT(domain) DO NOTHING
 `);
 
-// Domains the mail thread flags as handled by a third party — worth carrying over.
+// Domains the mail thread flags as handled by a third party - worth carrying over.
 const EXTERNALLY_MANAGED = new Set(['it-boltwise.de', 'popcorntimes.tv']);
 
 let siteCount = 0;
@@ -143,7 +143,7 @@ for (const line of SHEET.split('\n')) {
 /*
  * Live on the revenue side but absent from the Primis rollout sheet, so they are
  * tracked with every integration track still pending. Where the revenue sheet
- * carried a tracking link rather than an article URL, it goes into the notes —
+ * carried a tracking link rather than an article URL, it goes into the notes -
  * it is not a page the partner can QA against.
  */
 const REVENUE_ONLY = [
@@ -215,7 +215,7 @@ function seedIssue({ domain, title, description, type = 'technical', category, s
 
 /**
  * Seeded issues are written straight into the table, so the audit trail has to
- * be filled in explicitly — otherwise a fresh install shows an empty history
+ * be filled in explicitly - otherwise a fresh install shows an empty history
  * next to a site that plainly has work on it.
  */
 function recordHistory({ siteId: site, issueId, title, status, assignee }) {
@@ -240,7 +240,7 @@ function recordHistory({ siteId: site, issueId, title, status, assignee }) {
 seedBatch({
   title: 'Video player embedded in <head> instead of <body>',
   description:
-    'The Primis video player must be placed in the <body>, not the <head>. Implementing it in the head code is expected to hurt monetization.\n\nReported by Primis on 23 Aug. Re-checked on 25 Aug — still open on the domains listed below.',
+    'The Primis video player must be placed in the <body>, not the <head>. Implementing it in the head code is expected to hurt monetization.\n\nReported by Primis on 23 Aug. Re-checked on 25 Aug - still open on the domains listed below.',
   category: 'video_tag',
   severity: 'high',
   status: 'verified',
@@ -266,10 +266,10 @@ seedBatch({
 seedIssue({
   domain: 'newsile.com',
   title: 'Primis tag removed from the site entirely',
-  description: 'As of 25 Aug the Primis tag is no longer present on newsile.com. Likely removed by mistake during another deployment — please restore it and confirm.',
+  description: 'As of 25 Aug the Primis tag is no longer present on newsile.com. Likely removed by mistake during another deployment - please restore it and confirm.',
   category: 'display_tag',
   severity: 'blocker',
-  comments: [[partner, 'Noticed this during the re-check on 25 Aug — the tag was still there the day before.']],
+  comments: [[partner, 'Noticed this during the re-check on 25 Aug - the tag was still there the day before.']],
 });
 
 seedIssue({
@@ -283,7 +283,7 @@ seedIssue({
 seedIssue({
   domain: 'sky-flight.de',
   title: 'AMP traffic needs its own tag setup',
-  description: 'Mobile users are redirected to the AMP version unless they manually exit at the bottom. AMP requires a completely separate tag setup — confirm whether this domain serves strictly AMP traffic so Primis can generate dedicated AMP tags.',
+  description: 'Mobile users are redirected to the AMP version unless they manually exit at the bottom. AMP requires a completely separate tag setup - confirm whether this domain serves strictly AMP traffic so Primis can generate dedicated AMP tags.',
   category: 'amp',
   severity: 'high',
 });
@@ -300,7 +300,7 @@ seedIssue({
 seedIssue({
   domain: 'sky-flight.de',
   title: 'Hidden units inside wpb_wrapper are not rendering',
-  description: 'Some units render off-page — e.g. sky-flight.de_incontent_1_33357 sits inside a wpb_wrapper container that is not fully rendering. Please review those placements.',
+  description: 'Some units render off-page - e.g. sky-flight.de_incontent_1_33357 sits inside a wpb_wrapper container that is not fully rendering. Please review those placements.',
   category: 'layout',
   severity: 'medium',
 });
@@ -330,7 +330,7 @@ seedIssue({
 });
 
 seedBatch({
-  title: 'Negative revenue — investigate serving cost vs. yield',
+  title: 'Negative revenue - investigate serving cost vs. yield',
   type: 'revenue',
   description:
     'Looker shows negative revenue on these domains: operational and serving costs exceed the revenue generated. Primis applied a major optimization on 19 Aug; re-evaluate after a few days and decide whether to keep, re-setup, or drop the site.',
@@ -356,7 +356,7 @@ seedIssue({
   domain: 'speedxtc.com',
   title: 'Video RPM lags display RPM by a wide margin',
   description:
-    'Display is performing strongly here while video revenue stays flat. Video and display performance do not always correlate — review the player placement and demand mix on this domain.',
+    'Display is performing strongly here while video revenue stays flat. Video and display performance do not always correlate - review the player placement and demand mix on this domain.',
   type: 'revenue',
   category: 'performance',
   severity: 'medium',
@@ -366,20 +366,20 @@ seedIssue({
 seedIssue({
   domain: 'investoren-strategie.de',
   title: 'CMP not detectable on the domain',
-  description: 'Primis could not see a CMP on this domain. The publisher confirmed the new InMobi CMP is in use — verify it actually loads for EU traffic.',
+  description: 'Primis could not see a CMP on this domain. The publisher confirmed the new InMobi CMP is in use - verify it actually loads for EU traffic.',
   category: 'cmp',
   severity: 'high',
   status: 'ready_for_qa',
   comments: [
     [admin, 'We are using our new CMP from InMobi on this domain as well.'],
-    [partner, 'Thanks — re-checking on our side.'],
+    [partner, 'Thanks - re-checking on our side.'],
   ],
 });
 
 /*
  * Previous Session RPM per domain, taken verbatim from the revenue sheet.
  * Values are mixed EUR and USD there, so the currency travels with the number.
- * Primis Session RPM is deliberately left empty — the team fills that in.
+ * Primis Session RPM is deliberately left empty - the team fills that in.
  */
 const PREVIOUS_RPM = `
 maikikii.de|3.13|EUR
@@ -439,7 +439,7 @@ for (const line of PREVIOUS_RPM.split('\n')) {
 
 const counts = db.prepare('SELECT (SELECT COUNT(*) FROM sites) AS sites, (SELECT COUNT(*) FROM issues) AS issues, (SELECT COUNT(*) FROM users) AS users').get();
 console.log(`Added ${siteCount} domain(s) from the rollout sheet and ${extraCount} from the revenue sheet.`);
-console.log('Existing rows were left untouched — the seed only ever adds.');
+console.log('Existing rows were left untouched - the seed only ever adds.');
 console.log(`Set Previous Session RPM on ${rpmSet} site(s).`);
 if (rpmMissing.length) console.log(`Not tracked yet, RPM skipped: ${rpmMissing.join(', ')}`);
 console.log(`Database now holds ${counts.sites} sites, ${counts.issues} issues, ${counts.users} users.`);

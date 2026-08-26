@@ -79,6 +79,22 @@ body {
 /* Form controls inherit the theme instead of the browser's default chrome. */
 input, select, textarea, button { font: inherit; color: inherit; }
 
+/*
+ * Spinner arrows on number inputs eat 15-20px that a dense table cannot spare,
+ * and nobody nudges an RPM one step at a time anyway.
+ */
+/*
+ * A <select> reserves room for its widest option, and an <input type=number>
+ * for about twenty characters. Inside a fixed-layout table those intrinsic
+ * minimums push the whole grid wider than the screen, so inside a table the
+ * controls are allowed to shrink to whatever their column gives them.
+ */
+table select, table input, table textarea { min-width: 0; }
+
+input[type='number'] { -moz-appearance: textfield; appearance: textfield; }
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
 @utility field {
   width: 100%;
   border-radius: 0.5rem;

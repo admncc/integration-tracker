@@ -3,61 +3,59 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Site, TrackStatus } from '../lib/types';
-import { APPROVAL, CMP, CURRENCIES, READINESS, TRACKS, TRACK_STATUS, formatMoney, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
-import { Badge, Button, Empty, Field, InlineSelect, InlineText, Modal, Spinner, type Tone } from '../components/ui';
+import { APPROVAL, CMP, READINESS, TRACKS, TRACK_STATUS, formatMoney, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
+import { Badge, Button, CurrencyToggle, Empty, Field, InlineSelect, InlineText, Modal, Spinner, type Tone } from '../components/ui';
 import IssueModal from '../components/IssueModal';
 
 type FilterMap = Record<string, string>;
 type SortState = { key: string; dir: 1 | -1 };
 
-const STATUS_OPTIONS = Object.entries(TRACK_STATUS).map(([value, meta]) => ({ value: value as TrackStatus, label: meta.label }));
-const CMP_OPTIONS = Object.entries(CMP).map(([value, meta]) => ({ value, label: meta.label }));
-const APPROVAL_OPTIONS = Object.entries(APPROVAL).map(([value, meta]) => ({ value, label: meta.label }));
+// The table shows the short forms; the dropdown itself still spells them out.
+const STATUS_OPTIONS = Object.entries(TRACK_STATUS).map(([value, meta]) => ({ value: value as TrackStatus, label: meta.label, short: meta.short }));
+const CMP_OPTIONS = Object.entries(CMP).map(([value, meta]) => ({ value, label: meta.label, short: meta.short }));
+const APPROVAL_OPTIONS = Object.entries(APPROVAL).map(([value, meta]) => ({ value, label: meta.label, short: meta.short }));
 
 /** Column descriptors drive the header, the filter row and the cell renderer alike. */
 type Column = {
   key: string;
   label: string;
   kind: 'number' | 'money' | 'uplift' | 'text' | 'enum' | 'issues';
-  options?: { value: string; label: string }[];
+  options?: { value: string; label: string; short?: string }[];
   tones?: Record<string, Tone>;
-  width?: string;
-  sticky?: string;
+  /** A CSS percentage; all of them together make 100. */
+  width: string;
 };
 
 const tonesOf = (map: Record<string, { tone: string }>) =>
   Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v.tone as Tone]));
 
 /*
- * Widths are explicit because the table is `table-fixed`: the sticky left offsets
- * below are the running sum of the columns before them (checkbox 40px, prio 80px),
- * and an auto layout would silently drift out of that alignment.
+ * Widths are percentages that add up to 100 and the table is `table-fixed`, so
+ * the grid always fits the viewport - no horizontal scrolling, whatever the
+ * screen. Anything that does not survive that budget (managed by, notes) lives
+ * on the site's detail page instead.
  */
 const COLUMNS: Column[] = [
-  { key: 'priority', label: 'Prio', kind: 'number', width: 'w-20', sticky: 'left-10' },
-  { key: 'domain', label: 'Domain', kind: 'text', width: 'w-64', sticky: 'left-30' },
+  { key: 'priority', label: 'Prio', kind: 'number', width: '3.5%' },
+  { key: 'domain', label: 'Domain', kind: 'text', width: '17%' },
   ...TRACKS.map((track) => ({
     key: track.key,
     label: track.label,
     kind: 'enum' as const,
     options: STATUS_OPTIONS,
     tones: tonesOf(TRACK_STATUS),
-    width: 'w-40',
+    width: '8.1%',
   })),
-  { key: 'cmp', label: 'CMP', kind: 'enum', options: CMP_OPTIONS, tones: tonesOf(CMP), width: 'w-32' },
-  { key: 'approval', label: 'Approval', kind: 'enum', options: APPROVAL_OPTIONS, tones: tonesOf(APPROVAL), width: 'w-40' },
-  { key: 'open_issues', label: 'Issues', kind: 'issues', width: 'w-32' },
-  { key: 'managed_by', label: 'Managed by', kind: 'text', width: 'w-36' },
-  { key: 'notes', label: 'Notes', kind: 'text', width: 'w-48' },
-  // Revenue sits at the far right: useful to have, but not what the rollout is steered by.
-  { key: 'rpm_previous', label: 'Previous Session RPM', kind: 'money', width: 'w-44' },
-  { key: 'rpm_primis', label: 'Primis Session RPM', kind: 'money', width: 'w-44' },
-  { key: 'rpm_uplift', label: 'Δ vs. previous', kind: 'uplift', width: 'w-28' },
+  { key: 'cmp', label: 'CMP', kind: 'enum', options: CMP_OPTIONS, tones: tonesOf(CMP), width: '5.5%' },
+  { key: 'approval', label: 'Approval', kind: 'enum', options: APPROVAL_OPTIONS, tones: tonesOf(APPROVAL), width: '8%' },
+  { key: 'open_issues', label: 'Issues', kind: 'issues', width: '6%' },
+  { key: 'rpm_previous', label: 'Prev. RPM', kind: 'money', width: '6.5%' },
+  { key: 'rpm_primis', label: 'Primis RPM', kind: 'money', width: '6.5%' },
+  { key: 'rpm_uplift', label: 'Δ', kind: 'uplift', width: '4%' },
 ];
 
 /** Fields the partner may change; everything else is publisher-owned. */
 const PARTNER_WRITABLE = new Set(['approval', 'rpm_primis', 'rpm_primis_currency', 'notes']);
-const CURRENCY_OPTIONS = CURRENCIES.map((value: string) => ({ value, label: value }));
 
 export default function Sites() {
   const { user, can, eurUsd } = useSession();
@@ -72,7 +70,6 @@ export default function Sites() {
   const [readiness, setReadiness] = useState<'all' | 'live' | 'incomplete' | 'inactive'>('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState<Site | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
 
   const readOnly = (field: string) => (user?.role === 'partner' ? !PARTNER_WRITABLE.has(field) : !can('edit_site'));
@@ -92,9 +89,9 @@ export default function Sites() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  /** Optimistic cell edit — the row snaps back if the API rejects the change. */
+  /** Optimistic cell edit - the row snaps back if the API rejects the change. */
   async function patchSite(site: Site, field: string, raw: string) {
-    // Only the amounts are numeric — `rpm_*_currency` is a code and must stay a string.
+    // Only the amounts are numeric - `rpm_*_currency` is a code and must stay a string.
     const numeric = field === 'priority' || field === 'rpm_previous' || field === 'rpm_primis';
     const value = numeric ? (raw === '' ? null : Number(String(raw).replace(',', '.'))) : raw;
     const previous = sites;
@@ -176,18 +173,6 @@ export default function Sites() {
     });
   }
 
-  async function removeSite(site: Site) {
-    try {
-      await api.del(`/sites/${site.id}`);
-      setSites((current) => current.filter((s) => s.id !== site.id));
-      setNotice({ tone: 'green', text: `${site.domain} removed` });
-    } catch (err) {
-      setNotice({ tone: 'red', text: err instanceof Error ? err.message : 'Could not remove the site' });
-    } finally {
-      setRemoving(null);
-    }
-  }
-
   if (loading) return <Spinner />;
 
   return (
@@ -232,7 +217,7 @@ export default function Sites() {
           [
             ['live', `All five tracks live (${readinessCounts.live})`],
             ['incomplete', `Not fully live (${readinessCounts.incomplete})`],
-            ['inactive', `Priority 99 — not active (${readinessCounts.inactive})`],
+            ['inactive', `Priority 99 - not active (${readinessCounts.inactive})`],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -265,11 +250,11 @@ export default function Sites() {
         </div>
       )}
 
-      <div className="card overflow-x-auto">
-        <table className="w-full min-w-[2400px] table-fixed border-collapse text-sm">
+      <div className="card overflow-hidden">
+        <table className="w-full table-fixed border-collapse text-sm">
           <thead>
             <tr className="border-b border-line bg-raised">
-              <th className="sticky left-0 z-20 w-10 bg-raised px-2 py-2">
+              <th className="bg-raised px-2 py-2" style={{ width: '2.5%' }}>
                 <input
                   type="checkbox"
                   aria-label="Select all visible sites"
@@ -278,25 +263,19 @@ export default function Sites() {
                 />
               </th>
               {COLUMNS.map((column) => (
-                <th
-                  key={column.key}
-                  className={`px-2 py-2 text-left font-medium text-ink-soft ${column.width ?? ''} ${
-                    column.sticky ? `sticky ${column.sticky} z-20 bg-raised` : ''
-                  } ${column.key === 'domain' ? 'shadow-[1px_0_0_0_var(--color-line)]' : ''}`}
-                >
+                <th key={column.key} className="overflow-hidden px-2 py-2 text-left font-medium text-ink-soft" style={{ width: column.width }}>
                   <button onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-ink">
                     {column.label}
                     <span className={sort.key === column.key ? 'opacity-100' : 'opacity-0'}>{sort.dir === 1 ? '↑' : '↓'}</span>
                   </button>
                 </th>
               ))}
-              {can('manage_sites') && <th className="w-10 px-2 py-2" />}
             </tr>
 
             <tr className="border-b border-line bg-surface">
-              <th className="sticky left-0 z-20 bg-surface" />
+              <th className="bg-surface" />
               {COLUMNS.map((column) => (
-                <th key={column.key} className={`px-1.5 py-1.5 ${column.sticky ? `sticky ${column.sticky} z-20 bg-surface` : ''}`}>
+                <th key={column.key} className="overflow-hidden px-1.5 py-1.5">
                   <ColumnFilter
                     column={column}
                     value={filters[column.key] ?? ''}
@@ -304,7 +283,6 @@ export default function Sites() {
                   />
                 </th>
               ))}
-              {can('manage_sites') && <th />}
             </tr>
           </thead>
 
@@ -316,16 +294,14 @@ export default function Sites() {
                   (site.open_issues ?? 0) > 0 ? 'bg-tone-red-bg/25' : ''
                 } ${siteReadiness(site) === 'inactive' ? 'opacity-55' : ''}`}
               >
-                <td className="sticky left-0 z-10 bg-surface px-2 py-1.5">
+                <td className="px-2 py-1.5">
                   <input type="checkbox" aria-label={`Select ${site.domain}`} checked={selected.has(site.id)} onChange={() => toggleRow(site.id)} />
                 </td>
 
                 {COLUMNS.map((column) => (
                   <td
                     key={column.key}
-                    className={`px-2 py-1.5 align-middle ${column.sticky ? `sticky ${column.sticky} z-10 bg-surface` : ''} ${
-                      column.key === 'domain' ? 'shadow-[1px_0_0_0_var(--color-line)]' : ''
-                    }`}
+                    className="overflow-hidden px-2 py-1.5 align-middle"
                   >
                     <Cell
                       site={site}
@@ -337,17 +313,6 @@ export default function Sites() {
                   </td>
                 ))}
 
-                {can('manage_sites') && (
-                  <td className="px-1 py-1.5">
-                    <button
-                      onClick={() => setRemoving(site)}
-                      title={`Remove ${site.domain}`}
-                      className="rounded px-1.5 py-0.5 text-ink-faint hover:bg-tone-red-bg hover:text-tone-red"
-                    >
-                      ✕
-                    </button>
-                  </td>
-                )}
               </tr>
             ))}
           </tbody>
@@ -365,19 +330,6 @@ export default function Sites() {
             setAdding(false);
           }}
         />
-      )}
-
-      {removing && (
-        <Modal title={`Remove ${removing.domain}?`} onClose={() => setRemoving(null)}>
-          <p className="text-sm text-ink-soft">
-            This deletes the site and its {removing.total_issues ?? 0} issue(s) permanently. To keep the history instead, set the site to
-            archived from its detail page.
-          </p>
-          <div className="mt-4 flex justify-end gap-2">
-            <Button onClick={() => setRemoving(null)}>Cancel</Button>
-            <Button variant="danger" onClick={() => removeSite(removing)}>Remove permanently</Button>
-          </div>
-        </Modal>
       )}
 
       {bulkOpen && (
@@ -415,10 +367,12 @@ function Cell({
   if (column.kind === 'enum') {
     return (
       <InlineSelect
+        compact
         value={String(value)}
         options={column.options ?? []}
         tone={column.tones?.[String(value)] ?? 'slate'}
         disabled={disabled}
+        title={column.options?.find((o) => o.value === String(value))?.label}
         onChange={(next) => onCommit(column.key, next)}
       />
     );
@@ -426,12 +380,17 @@ function Cell({
 
   if (column.kind === 'uplift') {
     const uplift = rpmUplift(site, eurUsd);
-    if (uplift == null) return <span className="text-sm text-ink-faint">—</span>;
+    if (uplift == null) return <span className="text-sm text-ink-faint">-</span>;
     return (
-      <Badge tone={uplift > 0 ? 'green' : uplift < 0 ? 'red' : 'slate'}>
+      <span
+        className={`block truncate text-xs font-medium tabular-nums ${
+          uplift > 0 ? 'text-tone-green' : uplift < 0 ? 'text-tone-red' : 'text-ink-soft'
+        }`}
+        title={`Primis vs. the previous setup, converted to EUR`}
+      >
         {uplift > 0 ? '+' : ''}
         {uplift.toFixed(0)}%
-      </Badge>
+      </span>
     );
   }
 
@@ -439,25 +398,19 @@ function Cell({
     const currencyField = `${column.key}_currency`;
     const currency = String(site[currencyField as keyof Site] ?? 'EUR');
     if (disabled) {
-      return <span className="text-sm tabular-nums">{formatMoney(value as number | null, currency) || '—'}</span>;
+      return <span className="truncate text-sm tabular-nums">{formatMoney(value as number | null, currency) || '-'}</span>;
     }
     return (
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-0.5">
         <InlineText
           value={value == null ? '' : String(value)}
           disabled={false}
           onCommit={(next) => onCommit(column.key, next)}
           type="number"
-          placeholder="—"
-          className="tabular-nums"
+          placeholder="-"
+          className="min-w-0 flex-1 !px-1 text-xs tabular-nums"
         />
-        <InlineSelect
-          value={currency}
-          options={CURRENCY_OPTIONS}
-          tone="slate"
-          title={`Currency for ${column.label}`}
-          onChange={(next) => onCommit(currencyField, next)}
-        />
+        <CurrencyToggle value={currency} onChange={(next) => onCommit(currencyField, next)} />
       </div>
     );
   }
@@ -466,9 +419,15 @@ function Cell({
     const open = site.open_issues ?? 0;
     const qa = site.awaiting_qa ?? 0;
     return (
-      <Link to={`/issues?site_id=${site.id}`} className="inline-flex items-center gap-1">
-        <Badge tone={open === 0 ? 'muted' : open > 2 ? 'red' : 'amber'}>{open} open</Badge>
-        {qa > 0 && <Badge tone="blue">{qa} QA</Badge>}
+      <Link
+        to={`/issues?site_id=${site.id}`}
+        className="inline-flex items-center gap-1"
+        title={qa > 0 ? `${open} open, ${qa} waiting on the partner's re-check` : `${open} open issue(s)`}
+      >
+        <Badge tone={open === 0 ? 'muted' : open > 2 ? 'red' : 'amber'} className="!px-1.5">
+          {open} open
+        </Badge>
+        {qa > 0 && <span aria-hidden className="size-1.5 rounded-full bg-tone-blue" />}
       </Link>
     );
   }
@@ -478,7 +437,7 @@ function Cell({
     const missing = missingTracks(site);
     const title =
       readiness === 'inactive'
-        ? 'Priority 99 — not part of the active rollout'
+        ? 'Priority 99 - not part of the active rollout'
         : readiness === 'live'
           ? 'All five tracks are Live'
           : `Not live yet: ${missing.join(', ')}`;
@@ -504,7 +463,7 @@ function Cell({
       disabled={disabled}
       onCommit={(next) => onCommit(column.key, next)}
       type={column.kind === 'number' ? 'number' : 'text'}
-      className={column.kind === 'number' ? 'tabular-nums' : ''}
+      className={column.kind === 'number' ? '!px-1 text-center tabular-nums' : ''}
     />
   );
 }
@@ -582,7 +541,7 @@ function AddSiteModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   return (
     <Modal title="Add a domain" onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="Domain" hint="Without https:// or www. — every track starts as Pending.">
+        <Field label="Domain" hint="Without https:// or www. - every track starts as Pending.">
           <input className="field" required placeholder="example.de" value={form.domain} onChange={(e) => setForm({ ...form, domain: e.target.value })} />
         </Field>
         <div className="grid grid-cols-2 gap-3">

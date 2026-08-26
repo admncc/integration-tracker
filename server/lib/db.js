@@ -106,6 +106,16 @@ CREATE TABLE IF NOT EXISTS comments (
 );
 CREATE INDEX IF NOT EXISTS idx_comments_issue ON comments(issue_id);
 
+CREATE TABLE IF NOT EXISTS site_messages (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  site_id     INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+  author_id   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  reply_to_id INTEGER REFERENCES site_messages(id) ON DELETE SET NULL,
+  body        TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_site_messages_site ON site_messages(site_id, id);
+
 CREATE TABLE IF NOT EXISTS attachments (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   issue_id    INTEGER NOT NULL REFERENCES issues(id) ON DELETE CASCADE,
@@ -171,6 +181,22 @@ if (!userColumns.includes('username')) {
   `);
 }
 db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)');
+
+/*
+ * The per-site notes field became a discussion thread. Anything already written
+ * there is carried over as the opening message so no context is lost, and the
+ * column is left empty for the CSV importer to keep using.
+ */
+if (db.prepare("SELECT COUNT(*) AS n FROM sites WHERE notes != ''").get().n > 0) {
+  const carried = db.prepare("SELECT id, notes FROM sites WHERE notes != ''").all();
+  const insert = db.prepare('INSERT INTO site_messages (site_id, author_id, body) VALUES (?, NULL, ?)');
+  const clear = db.prepare("UPDATE sites SET notes = '' WHERE id = ?");
+  for (const site of carried) {
+    const already = db.prepare('SELECT 1 FROM site_messages WHERE site_id = ? AND body = ?').get(site.id, site.notes);
+    if (!already) insert.run(site.id, site.notes);
+    clear.run(site.id);
+  }
+}
 
 /** Small key/value store for the handful of instance-wide settings. */
 export function getSetting(key, fallback = null) {

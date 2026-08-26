@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
-import type { ActivityEntry, Issue, Site, User } from '../lib/types';
+import type { ActivityEntry, Issue, Site, SiteMessage, User } from '../lib/types';
 import { APPROVAL, CMP, CURRENCIES, ISSUE_STATUS, READINESS, TRACKS, TRACK_STATUS, formatMoney, missingTracks, rpmUplift, siteCompletion, siteReadiness } from '@shared/domain.js';
 import { Badge, Button, Empty, InlineSelect, InlineText, Modal, Spinner, Timestamp, type Tone } from '../components/ui';
 import IssueCard from '../components/IssueCard';
 import IssueModal from '../components/IssueModal';
+import SiteChat from '../components/SiteChat';
 
 const STATUS_OPTIONS = Object.entries(TRACK_STATUS).map(([value, meta]) => ({ value, label: meta.label }));
 const CMP_OPTIONS = Object.entries(CMP).map(([value, meta]) => ({ value, label: meta.label }));
@@ -24,20 +25,23 @@ export default function SiteDetail() {
   const [site, setSite] = useState<Site | null>(null);
   const [issues, setIssues] = useState<Issue[]>([]);
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [messages, setMessages] = useState<SiteMessage[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<IssueFilter>('open');
   const [composing, setComposing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmText, setConfirmText] = useState('');
 
   const load = useCallback(() => {
     return api
-      .get<{ site: Site; issues: Issue[]; activity: ActivityEntry[] }>(`/sites/${id}`)
+      .get<{ site: Site; issues: Issue[]; activity: ActivityEntry[]; messages: SiteMessage[] }>(`/sites/${id}`)
       .then((r) => {
         setSite(r.site);
         setIssues(r.issues);
         setActivity(r.activity);
+        setMessages(r.messages);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
@@ -53,7 +57,7 @@ export default function SiteDetail() {
 
   async function patchSite(field: string, raw: string) {
     if (!site) return;
-    // Only the amounts are numeric — `rpm_*_currency` is a code and must stay a string.
+    // Only the amounts are numeric - `rpm_*_currency` is a code and must stay a string.
     const numeric = field === 'priority' || field === 'rpm_previous' || field === 'rpm_primis';
     const value = numeric ? (raw === '' ? null : Number(String(raw).replace(',', '.'))) : raw;
     const previous = site;
@@ -101,13 +105,12 @@ export default function SiteDetail() {
             <p className="text-xs text-tone-red">Still to go live: {missingTracks(site).join(', ')}</p>
           )}
           {readiness === 'inactive' && (
-            <p className="text-xs text-ink-faint">Priority 99 — parked. Give it a lower number to bring it into the rollout.</p>
+            <p className="text-xs text-ink-faint">Priority 99 - parked. Give it a lower number to bring it into the rollout.</p>
           )}
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <Button variant="primary" onClick={() => setComposing(true)}>+ New issue</Button>
-          {can('manage_sites') && <Button variant="danger" onClick={() => setConfirmRemove(true)}>Remove site</Button>}
         </div>
       </div>
 
@@ -206,25 +209,17 @@ export default function SiteDetail() {
                     </Badge>
                   )}
                   <p className="mt-1 text-xs text-ink-faint">
-                    {formatMoney(site.rpm_previous, site.rpm_previous_currency) || '—'} →{' '}
-                    {formatMoney(site.rpm_primis, site.rpm_primis_currency) || '—'}
+                    {formatMoney(site.rpm_previous, site.rpm_previous_currency) || '-'} →{' '}
+                    {formatMoney(site.rpm_primis, site.rpm_primis_currency) || '-'}
                     {site.rpm_previous_currency !== site.rpm_primis_currency && ` · converted at ${eurUsd} USD/EUR`}
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="mt-4 border-t border-line pt-4">
-              <span className="text-xs text-ink-faint">Notes</span>
-              <textarea
-                className="field mt-1 min-h-20"
-                defaultValue={site.notes}
-                key={site.notes}
-                disabled={readOnly('notes')}
-                onBlur={(event) => event.target.value !== site.notes && patchSite('notes', event.target.value)}
-              />
-            </div>
           </section>
+
+          <SiteChat siteId={site.id} messages={messages} onChange={setMessages} />
 
           <section className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -255,10 +250,17 @@ export default function SiteDetail() {
             {shown.length === 0 && (
               <div className="card">
                 <Empty>
-                  {filter === 'open' ? 'No open issues on this site — everything is ticked off.' : 'Nothing here yet.'}
+                  {filter === 'open' ? 'No open issues on this site - everything is ticked off.' : 'Nothing here yet.'}
                 </Empty>
               </div>
             )}
+
+            <button
+              onClick={() => setComposing(true)}
+              className="w-full rounded-xl border border-dashed border-line-strong py-3 text-sm text-ink-soft transition hover:border-brand hover:text-brand"
+            >
+              + Raise an issue on {site.domain}
+            </button>
           </section>
         </div>
 
@@ -278,6 +280,19 @@ export default function SiteDetail() {
         </aside>
       </div>
 
+      {can('manage_sites') && (
+        <section className="rounded-xl border border-tone-red/30 bg-tone-red-bg/30 p-4">
+          <h2 className="text-sm font-semibold text-tone-red">Remove this site</h2>
+          <p className="mt-1 mb-3 max-w-2xl text-sm text-ink-soft">
+            Deleting {site.domain} also removes its {issues.length} issue(s), every comment, every screenshot and the whole
+            discussion. Archiving keeps the record and takes the domain out of the list instead.
+          </p>
+          <Button variant="danger" onClick={() => setConfirmRemove(true)}>
+            Remove {site.domain}
+          </Button>
+        </section>
+      )}
+
       {composing && (
         <IssueModal
           siteIds={[site.id]}
@@ -294,10 +309,27 @@ export default function SiteDetail() {
       {confirmRemove && (
         <Modal title={`Remove ${site.domain}?`} onClose={() => setConfirmRemove(false)}>
           <p className="text-sm text-ink-soft">
-            This permanently deletes the site, its {issues.length} issue(s), their comments and images. Archiving keeps the record instead.
+            This permanently deletes the site, its {issues.length} issue(s), their comments, screenshots and discussion.
+            It cannot be undone.
           </p>
-          <div className="mt-4 flex justify-end gap-2">
-            <Button onClick={() => setConfirmRemove(false)}>Cancel</Button>
+
+          <div className="mt-3 rounded-lg bg-raised px-3 py-2 text-sm">
+            <label className="block">
+              <span className="text-xs text-ink-soft">
+                Type <span className="font-mono font-medium text-ink">{site.domain}</span> to confirm
+              </span>
+              <input
+                className="field mt-1"
+                autoFocus
+                value={confirmText}
+                onChange={(event) => setConfirmText(event.target.value)}
+                placeholder={site.domain}
+              />
+            </label>
+          </div>
+
+          <div className="mt-4 flex flex-wrap justify-end gap-2">
+            <Button onClick={() => { setConfirmRemove(false); setConfirmText(''); }}>Cancel</Button>
             <Button
               onClick={async () => {
                 await patchSite('archived', '1');
@@ -309,6 +341,7 @@ export default function SiteDetail() {
             </Button>
             <Button
               variant="danger"
+              disabled={confirmText.trim() !== site.domain}
               onClick={async () => {
                 await api.del(`/sites/${site.id}`);
                 navigate('/sites');
@@ -324,7 +357,7 @@ export default function SiteDetail() {
 }
 
 /**
- * The page the partner actually QAs against — the first thing either side needs
+ * The page the partner actually QAs against - the first thing either side needs
  * from a site, so it gets its own bar rather than a cell in a form grid.
  */
 function TestUrlBar({ url, disabled, onSave }: { url: string; disabled: boolean; onSave: (value: string) => void }) {
@@ -340,7 +373,7 @@ function TestUrlBar({ url, disabled, onSave }: { url: string; disabled: boolean;
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     } catch {
-      /* clipboard permission denied — the link is still visible and selectable */
+      /* clipboard permission denied - the link is still visible and selectable */
     }
   }
 
@@ -463,7 +496,7 @@ function Editable({
 
 function describe(entry: ActivityEntry) {
   const label = (value: string | null) => {
-    if (!value) return '—';
+    if (!value) return '-';
     const map = { ...TRACK_STATUS, ...CMP, ...APPROVAL, ...ISSUE_STATUS } as Record<string, { label: string }>;
     return map[value]?.label ?? value;
   };
@@ -477,6 +510,8 @@ function describe(entry: ActivityEntry) {
       return <>raised “{entry.new_value}”</>;
     case 'attachment_added':
       return <>attached {entry.new_value}</>;
+    case 'message_posted':
+      return <>wrote in the discussion: “{entry.new_value}”</>;
     case 'issue_status':
       return (
         <>

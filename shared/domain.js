@@ -3,13 +3,14 @@
  * this tool replaces, so the team can map old rows onto new records at a glance.
  */
 
+/** `short` keeps the sheet's numbering so a narrow cell still maps to the old doc. */
 export const TRACK_STATUS = {
-  live:     { label: '1 – Live',                short: 'Live',      tone: 'green'  },
-  qa:       { label: '2 – Site under QA',       short: 'QA',        tone: 'blue'   },
-  tag_impl: { label: '3 – Tag implementation',  short: 'Impl.',     tone: 'amber'  },
-  tag_prep: { label: '4 – Tags prep',           short: 'Prep',      tone: 'purple' },
-  pending:  { label: '5 – Pending',             short: 'Pending',   tone: 'slate'  },
-  na:       { label: '– n/a',                   short: 'n/a',       tone: 'muted'  },
+  live:     { label: '1 - Live',                short: '1 Live',    tone: 'green'  },
+  qa:       { label: '2 - Site under QA',       short: '2 QA',      tone: 'blue'   },
+  tag_impl: { label: '3 - Tag implementation',  short: '3 Impl.',   tone: 'amber'  },
+  tag_prep: { label: '4 - Tags prep',           short: '4 Prep',    tone: 'purple' },
+  pending:  { label: '5 - Pending',             short: '5 Pending', tone: 'slate'  },
+  na:       { label: 'n/a',                     short: 'n/a',       tone: 'muted'  },
 };
 
 /** The five integration tracks every site moves through, in reporting order. */
@@ -22,16 +23,16 @@ export const TRACKS = [
 ];
 
 export const CMP = {
-  none: { label: 'No CMP',  tone: 'red'   },
-  old:  { label: 'Old CMP', tone: 'amber' },
-  new:  { label: 'New CMP', tone: 'green' },
+  none: { label: 'No CMP',  short: 'None', tone: 'red'   },
+  old:  { label: 'Old CMP', short: 'Old',  tone: 'amber' },
+  new:  { label: 'New CMP', short: 'New',  tone: 'green' },
 };
 
 export const APPROVAL = {
-  none:     { label: 'Not submitted',    tone: 'slate' },
-  sent:     { label: 'Sent to approval', tone: 'blue'  },
-  approved: { label: 'Approved',         tone: 'green' },
-  rejected: { label: 'Rejected',         tone: 'red'   },
+  none:     { label: 'Not submitted',    short: 'Not sent', tone: 'slate' },
+  sent:     { label: 'Sent to approval', short: 'Sent',     tone: 'blue'  },
+  approved: { label: 'Approved',         short: 'Approved', tone: 'green' },
+  rejected: { label: 'Rejected',         short: 'Rejected', tone: 'red'   },
 };
 
 /**
@@ -93,6 +94,7 @@ export const ROLES = {
  * before the switch, and what it earns through Primis now.
  */
 export const CURRENCIES = ['EUR', 'USD'];
+export const CURRENCY_SYMBOL = { EUR: '\u20ac', USD: '$' };
 
 /** Both figures are converted into this before any comparison is shown. */
 export const BASE_CURRENCY = 'EUR';
@@ -139,11 +141,11 @@ export const INACTIVE_PRIORITY = 99;
  * The traffic light on a domain, and the single definition of "live" the whole
  * tool uses:
  *
- *   inactive   – priority 99, parked rather than being worked on
- *   live       – all five integration tracks are Live
- *   incomplete – anything else
+ *   inactive   - priority 99, parked rather than being worked on
+ *   live       - all five integration tracks are Live
+ *   incomplete - anything else
  *
- * Note this is about the integration, not about open issues — those are shown
+ * Note this is about the integration, not about open issues - those are shown
  * by the issue count and the row highlight.
  */
 export function siteReadiness(site) {
@@ -162,7 +164,7 @@ export function missingTracks(site) {
   return TRACKS.filter(({ key }) => site[key] !== 'live').map(({ label }) => label);
 }
 
-/** Share of tracks that are Live — the same yardstick as the traffic light. */
+/** Share of tracks that are Live - the same yardstick as the traffic light. */
 export function siteCompletion(site) {
   const done = TRACKS.filter(({ key }) => site[key] === 'live').length;
   return Math.round((done / TRACKS.length) * 100);

@@ -125,7 +125,7 @@ const HEADER_ALIASES = {
 };
 
 /**
- * Maps CSV rows onto site records. Returns `{ sites, skipped }` — rows without a
+ * Maps CSV rows onto site records. Returns `{ sites, skipped }` - rows without a
  * usable domain are reported back rather than silently dropped.
  */
 export function csvToSites(text) {

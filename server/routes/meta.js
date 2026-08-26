@@ -58,7 +58,7 @@ metaRouter.get('/stats', (_req, res) => {
     .get(...OPEN_ISSUE_STATUSES);
 
   /*
-   * "How is Primis performing?" — the comparison both sides look at. The two
+   * "How is Primis performing?" - the comparison both sides look at. The two
    * figures arrive in different currencies, so each is divided by the EUR/USD
    * rate when it is a USD value before anything is compared or averaged.
    */
@@ -224,8 +224,17 @@ metaRouter.get('/export.csv', (_req, res) => {
     'PRIO', 'Domain', 'STATUS (video)', 'STATUS (display)', 'TEST URL', 'Ads.txt (ManagerDomain)',
     'STATUS (ads.txt & ad tag)', 'MCM', 'CMP', 'Demand partner approval',
     'Previous Session RPM', 'Previous RPM currency', 'Primis Session RPM', 'Primis RPM currency',
-    'Managed by', 'Open issues', 'Notes',
+    'Managed by', 'Open issues', 'Latest message',
   ];
+  const latestMessage = new Map(
+    db
+      .prepare(
+        `SELECT site_id, body FROM site_messages
+          WHERE id IN (SELECT MAX(id) FROM site_messages GROUP BY site_id)`
+      )
+      .all()
+      .map((row) => [row.site_id, row.body])
+  );
   const openCounts = new Map(
     db
       .prepare(`SELECT site_id, COUNT(*) AS n FROM issues WHERE status IN (${openPlaceholders}) GROUP BY site_id`)
@@ -240,7 +249,7 @@ metaRouter.get('/export.csv', (_req, res) => {
     label(TRACK_STATUS, s.status_ads_txt), label(TRACK_STATUS, s.status_ad_tag), label(TRACK_STATUS, s.status_mcm),
     label(CMP, s.cmp), label(APPROVAL, s.approval),
     s.rpm_previous ?? '', s.rpm_previous_currency, s.rpm_primis ?? '', s.rpm_primis_currency,
-    s.managed_by, openCounts.get(s.id) ?? 0, s.notes,
+    s.managed_by, openCounts.get(s.id) ?? 0, latestMessage.get(s.id) ?? '',
   ]);
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -284,6 +293,25 @@ metaRouter.post('/import', requireRole('admin', 'dev'), (req, res) => {
 
   for (const site of sites) insert.run(...columns.map((c) => site[c]));
 
+  /*
+   * A Notes column in the sheet becomes the opening message of the domain's
+   * discussion - the tracker has no notes field any more, and dropping the text
+   * silently would lose whatever context the sheet carried.
+   */
+  const postNote = db.prepare('INSERT INTO site_messages (site_id, author_id, body) VALUES (?, ?, ?)');
+  const noteExists = db.prepare('SELECT 1 FROM site_messages WHERE site_id = ? AND body = ?');
+  const siteIdFor = db.prepare('SELECT id FROM sites WHERE domain = ?');
+  let notesImported = 0;
+
+  for (const site of sites) {
+    if (!site.notes) continue;
+    const row = siteIdFor.get(site.domain);
+    if (!row || noteExists.get(row.id, site.notes)) continue;
+    postNote.run(row.id, req.user.id, site.notes);
+    notesImported += 1;
+  }
+  db.prepare("UPDATE sites SET notes = ''").run();
+
   logActivity({ actorId: req.user.id, kind: 'import', newValue: `${created.length} created, ${updated.length} updated` });
-  res.json({ created, updated, skipped });
+  res.json({ created, updated, skipped, notes_imported: notesImported });
 });

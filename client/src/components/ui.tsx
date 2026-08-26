@@ -47,28 +47,32 @@ export function InlineSelect<T extends string>({
   disabled = false,
   onChange,
   title,
+  compact = false,
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  options: { value: T; label: string; short?: string }[];
   tone?: Tone;
   disabled?: boolean;
   onChange: (next: T) => void;
   title?: string;
+  /** Render the short forms - for table cells that have to stay inside a column. */
+  compact?: boolean;
 }) {
   const current = options.find((o) => o.value === value);
   return (
-    <div className="relative inline-block">
+    <div className={`relative ${compact ? 'block' : 'inline-block'}`}>
       <select
         value={value}
         disabled={disabled}
         title={title ?? current?.label}
         onChange={(event) => onChange(event.target.value as T)}
-        className={`appearance-none rounded-full py-0.5 pl-2 text-xs font-medium outline-none transition
-          ${TONE_CLASS[tone]} ${disabled ? 'cursor-default pr-2' : 'cursor-pointer pr-5 hover:brightness-95 focus:ring-2 focus:ring-brand/40'}`}
+        className={`w-full max-w-full appearance-none truncate rounded-full py-0.5 text-xs font-medium outline-none transition
+          ${compact ? 'pl-1.5' : 'pl-2'} ${TONE_CLASS[tone]}
+          ${disabled ? 'cursor-default pr-2' : `cursor-pointer ${compact ? 'pr-4' : 'pr-5'} hover:brightness-95 focus:ring-2 focus:ring-brand/40`}`}
       >
         {options.map((option) => (
           <option key={option.value} value={option.value} className="bg-surface text-ink">
-            {option.label}
+            {compact ? (option.short ?? option.label) : option.label}
           </option>
         ))}
       </select>
@@ -86,7 +90,7 @@ export function InlineText({
   value,
   onCommit,
   disabled = false,
-  placeholder = '—',
+  placeholder = '-',
   type = 'text',
   className = '',
 }: {
@@ -119,6 +123,38 @@ export function InlineText({
       className={`w-full rounded border border-transparent bg-transparent px-1.5 py-0.5 text-sm outline-none
         hover:border-line focus:border-brand focus:bg-surface ${className}`}
     />
+  );
+}
+
+/**
+ * Two-state currency switch. A dropdown for two options costs the width of a
+ * chevron plus a label; in a table column that has to fit on screen, a button
+ * showing the symbol is both smaller and quicker to hit.
+ */
+export function CurrencyToggle({
+  value,
+  disabled = false,
+  onChange,
+}: {
+  value: string;
+  disabled?: boolean;
+  onChange: (next: string) => void;
+}) {
+  const next = value === 'EUR' ? 'USD' : 'EUR';
+  const symbol = value === 'USD' ? '$' : '\u20ac';
+
+  if (disabled) return <span className="px-1 text-xs text-ink-faint">{symbol}</span>;
+
+  return (
+    <button
+      type="button"
+      onClick={() => onChange(next)}
+      title={`${value} - click to switch to ${next}`}
+      aria-label={`Currency ${value}, switch to ${next}`}
+      className="shrink-0 rounded border border-line px-1 py-0.5 text-xs font-medium text-ink-soft transition hover:border-brand hover:text-brand"
+    >
+      {symbol}
+    </button>
   );
 }
 
@@ -202,7 +238,7 @@ export function parseTimestamp(iso: string) {
   return new Date(iso.includes('T') ? iso : `${iso.replace(' ', 'T')}Z`);
 }
 
-/** Absolute date + time — the audit trail needs to be unambiguous, not just "2 days ago". */
+/** Absolute date + time - the audit trail needs to be unambiguous, not just "2 days ago". */
 export function formatDateTime(iso: string) {
   return parseTimestamp(iso).toLocaleString(undefined, {
     year: 'numeric', month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit',

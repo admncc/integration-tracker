@@ -75,7 +75,7 @@ export function requireRole(...roles) {
  * request succeeds, every request after it is a 401, and the app looks empty.
  *
  * `req.secure` is true for direct HTTPS, and behind a reverse proxy it reads
- * X-Forwarded-Proto once TRUST_PROXY is set — so a proper deployment still gets
+ * X-Forwarded-Proto once TRUST_PROXY is set - so a proper deployment still gets
  * a secure cookie. INSECURE_COOKIES=1 forces it off if a proxy reports the wrong
  * protocol.
  */

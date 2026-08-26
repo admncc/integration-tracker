@@ -87,7 +87,7 @@ export default function Settings() {
                   {row.id === user?.id && <span className="ml-2 text-xs text-ink-faint">you</span>}
                 </td>
                 <td className="px-4 py-2 font-mono text-xs">{row.username}</td>
-                <td className="px-4 py-2 text-ink-soft">{row.company || '—'}</td>
+                <td className="px-4 py-2 text-ink-soft">{row.company || '-'}</td>
                 <td className="px-4 py-2">
                   {can('manage_users') ? (
                     <select className="field !w-auto !py-1 text-xs" value={row.role} onChange={(event) => changeRole(row, event.target.value as User['role'])}>
@@ -206,7 +206,7 @@ function NewUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           </Field>
         </div>
 
-        <Field label="E-mail (optional)" hint="Only for reference — sign-in works with the username.">
+        <Field label="E-mail (optional)" hint="Only for reference - sign-in works with the username.">
           <input className="field" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
         </Field>
 
@@ -310,7 +310,7 @@ function ExchangeRatePanel() {
       <h2 className="text-sm font-semibold">EUR / USD rate</h2>
       <p className="mb-3 text-xs text-ink-soft">
         Previous Session RPM and Primis Session RPM are entered in whichever currency the provider reports. Everything
-        comparable — the Δ column, the dashboard averages — is converted to EUR with this rate.
+        comparable - the Δ column, the dashboard averages - is converted to EUR with this rate.
       </p>
 
       <form
@@ -362,7 +362,7 @@ function ExchangeRatePanel() {
               ? `European Central Bank${settings.rate_date ? `, reference date ${settings.rate_date}` : ''}`
               : settings.source === 'manual'
                 ? 'Entered by hand'
-                : 'Built-in fallback — not pulled yet'}
+                : 'Built-in fallback - not pulled yet'}
           </span>
         </div>
         {settings.updated_at && (
@@ -448,10 +448,10 @@ function ImportPanel() {
       {error && <p className="mt-2 text-sm text-tone-red">{error}</p>}
       {result && (
         <div className="mt-3 space-y-1 rounded-lg bg-raised p-3 text-xs">
-          <p className="font-medium">{result.dry_run ? 'Preview — nothing written yet' : 'Import finished'}</p>
-          <p className="text-tone-green">{result.created.length} new: {result.created.join(', ') || '—'}</p>
+          <p className="font-medium">{result.dry_run ? 'Preview - nothing written yet' : 'Import finished'}</p>
+          <p className="text-tone-green">{result.created.length} new: {result.created.join(', ') || '-'}</p>
           <p className="text-ink-soft">{result.updated.length} updated</p>
-          {result.skipped.length > 0 && <p className="text-tone-amber">{result.skipped.length} row(s) skipped — no usable domain</p>}
+          {result.skipped.length > 0 && <p className="text-tone-amber">{result.skipped.length} row(s) skipped - no usable domain</p>}
         </div>
       )}
     </section>

@@ -48,6 +48,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   app.listen(port, () => {
     console.log(`Integration Tracker API on http://localhost:${port}`);
-    if (!existsSync(clientDist)) console.log('No client build found — run `npm run dev` for the UI.');
+    if (!existsSync(clientDist)) console.log('No client build found - run `npm run dev` for the UI.');
   });
 }
