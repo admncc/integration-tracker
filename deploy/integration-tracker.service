@@ -1,0 +1,33 @@
+[Unit]
+Description=Integration Tracker
+Documentation=https://github.com/admncc/integration-tracker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tracker
+Group=tracker
+WorkingDirectory=/opt/integration-tracker
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/integration-tracker/.env
+ExecStart=/usr/bin/node server/index.js
+Restart=always
+RestartSec=5
+
+# The database and the uploaded screenshots are the only things it may write.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/opt/integration-tracker/data
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=integration-tracker
+
+[Install]
+WantedBy=multi-user.target

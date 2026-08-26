@@ -82,7 +82,10 @@ npm start           # one process serves the API and the UI on :4000
 ```
 
 Put it behind a TLS-terminating reverse proxy and set `TRUST_PROXY=1` so client
-IPs and secure cookies are correct.
+IPs and secure cookies are correct. **[docs/deploy.md](docs/deploy.md)** walks
+through a full server install step by step — Node, a service user, systemd,
+nginx, a certificate and backups. Ready-made unit and nginx files are in
+`deploy/`.
 
 ### Environment
 
