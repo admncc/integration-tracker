@@ -5,6 +5,7 @@ import { hashPassword, requireAuth, requireRole } from '../lib/auth.js';
 import { APPROVAL, CMP, DEFAULT_EUR_USD, FX_SETTING_KEY, OPEN_ISSUE_STATUSES, TRACKS, TRACK_STATUS } from '../../shared/domain.js';
 import { FX_KEYS, fxState, refreshRate } from '../lib/fx.js';
 import { csvToSites, toCsv } from '../lib/sheet.js';
+import { importRowSchema } from './sites.js';
 
 export const metaRouter = Router();
 metaRouter.use(requireAuth);
@@ -257,8 +258,15 @@ metaRouter.get('/export.csv', (_req, res) => {
   const latestMessage = new Map(
     db
       .prepare(
+        /*
+         * Deleted messages are excluded twice over: the tombstone must not be
+         * exported, and it must not hide the live message behind it either.
+         * The export used to carry the full text of a message the UI had
+         * already replaced with "This message was deleted".
+         */
         `SELECT site_id, body FROM site_messages
-          WHERE id IN (SELECT MAX(id) FROM site_messages GROUP BY site_id)`
+          WHERE deleted_at IS NULL
+            AND id IN (SELECT MAX(id) FROM site_messages WHERE deleted_at IS NULL GROUP BY site_id)`
       )
       .all()
       .map((row) => [row.site_id, row.body])
@@ -302,6 +310,25 @@ metaRouter.post('/import', requireRole('admin'), (req, res) => {
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
+
+  /*
+   * Every row goes through the same rules the API enforces on a hand edit. A
+   * row that breaks one is reported and left out rather than aborting the whole
+   * paste - a single stray cell should not cost the operator the other 200 rows.
+   */
+  const rejected = [];
+  const checked = [];
+  for (const site of sites) {
+    const row = importRowSchema.safeParse(site);
+    // The validated row is what gets written, so the same coercions apply.
+    if (row.success) checked.push(row.data);
+    else {
+      const problem = row.error.issues[0];
+      rejected.push(`${site.domain || '(no domain)'}: ${problem.path.join('.') || 'row'} - ${problem.message}`);
+    }
+  }
+  sites = checked;
+  skipped = [...skipped, ...rejected];
 
   if (sites.length === 0) {
     return res.status(400).json({ error: 'No row in that CSV had a usable domain', skipped });

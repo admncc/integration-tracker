@@ -174,7 +174,9 @@ export default function Dashboard() {
                             ? 'deleted'
                             : entry.kind === 'issue_restored'
                               ? 'restored'
-                              : 'changed'}{' '}
+                              : entry.kind === 'site_deleted'
+                                ? 'deleted the domain'
+                                : 'changed'}{' '}
                   {entry.kind === 'issue_status' ? (ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value) : entry.new_value ?? entry.field}
                   {entry.domain && (
                     <>

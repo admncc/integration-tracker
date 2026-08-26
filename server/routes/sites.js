@@ -39,11 +39,27 @@ const siteFields = {
   rpm_previous_currency: z.enum(CURRENCIES),
   rpm_primis_currency: z.enum(CURRENCIES),
   managed_by: z.string().trim().max(190),
-  archived: z.coerce.boolean(),
+  /*
+   * A real boolean, not a coerced one. z.coerce.boolean() turns "false" and
+   * "0" into true, so the call meant to bring a site back archived it instead.
+   * The same trap was already fixed for users.active and the FX switch.
+   */
+  archived: z.boolean({ invalid_type_error: 'archived must be true or false' }),
 };
 
 const createSchema = z.object(siteFields).partial().required({ domain: true }).strict();
 const updateSchema = z.object(siteFields).partial().strict();
+
+/**
+ * The same field rules, for the CSV importer. A pasted sheet used to reach the
+ * table unchecked, so a negative RPM the API rejects with a 400 went straight in
+ * and then silently dropped the domain out of the dashboard comparison.
+ */
+export const importRowSchema = z
+  .object({ ...siteFields, notes: z.string().trim().max(20000) })
+  .partial()
+  .required({ domain: true })
+  .strict();
 
 /** Sites plus their open-issue counts, so the list view needs a single query. */
 function listSites({ includeArchived = false } = {}) {
@@ -126,8 +142,18 @@ sitesRouter.post('/:id/messages', (req, res) => {
       .run(id, req.user.id, replyTo, parsed.data.body).lastInsertRowid
   );
 
-  // Goes on the audit trail so a new question surfaces in the activity feed.
-  logActivity({ siteId: id, actorId: req.user.id, kind: 'message_posted', newValue: parsed.data.body.slice(0, 120) });
+  /*
+   * Goes on the audit trail so a new question surfaces in the activity feed.
+   * `field` carries the message id, which is what lets a later delete redact
+   * this row and nothing else.
+   */
+  logActivity({
+    siteId: id,
+    actorId: req.user.id,
+    kind: 'message_posted',
+    field: String(messageId),
+    newValue: parsed.data.body.slice(0, 120),
+  });
 
   res.status(201).json({ message: listMessages(id).find((m) => m.id === messageId) });
 });
@@ -148,10 +174,34 @@ sitesRouter.delete('/:id/messages/:messageId', (req, res) => {
    * after the author had removed it.
    */
   db.prepare("UPDATE site_messages SET deleted_at = datetime('now') WHERE id = ?").run(message.id);
-  db.prepare(
-    `UPDATE activity SET new_value = '(message deleted)'
-      WHERE site_id = ? AND kind = 'message_posted' AND new_value = ?`
-  ).run(message.site_id, message.body.slice(0, 120));
+
+  /*
+   * Redact this message's own row, addressed by id, and keep the original in
+   * old_value so a restore can put it back.
+   *
+   * The match used to be on the body text, which had two consequences: posting
+   * the same sentence as somebody else and deleting your own copy redacted
+   * their audit row as well - a way to launder another party's entry - and a
+   * restore never undid the redaction, so the History panel kept saying
+   * "(message deleted)" about a message that was visible again.
+   */
+  const redact = db.prepare(
+    `UPDATE activity SET old_value = new_value, new_value = '(message deleted)'
+      WHERE kind = 'message_posted' AND field = ? AND new_value != '(message deleted)'`
+  ).run(String(message.id));
+
+  if (redact.changes === 0) {
+    /*
+     * Rows written before the id was recorded. Narrowed to this author, so it
+     * can still only redact their own entry.
+     */
+    db.prepare(
+      `UPDATE activity SET old_value = new_value, new_value = '(message deleted)'
+        WHERE site_id = ? AND kind = 'message_posted' AND field IS NULL
+          AND new_value = ? AND actor_id IS ?`
+    ).run(message.site_id, message.body.slice(0, 120), message.author_id);
+  }
+
   logActivity({ siteId: message.site_id, actorId: req.user.id, kind: 'message_deleted', newValue: '(message deleted)' });
 
   res.json({ ok: true, message: listMessages(message.site_id).find((m) => m.id === message.id) });
@@ -169,6 +219,13 @@ sitesRouter.post('/:id/messages/:messageId/restore', (req, res) => {
   }
 
   db.prepare('UPDATE site_messages SET deleted_at = NULL WHERE id = ?').run(message.id);
+
+  // Put the redacted audit row back, now that the message is visible again.
+  db.prepare(
+    `UPDATE activity SET new_value = old_value, old_value = NULL
+      WHERE kind = 'message_posted' AND field = ? AND new_value = '(message deleted)' AND old_value IS NOT NULL`
+  ).run(String(message.id));
+
   logActivity({ siteId: message.site_id, actorId: req.user.id, kind: 'message_restored', newValue: message.body.slice(0, 120) });
 
   res.json({ ok: true, message: listMessages(message.site_id).find((m) => m.id === message.id) });
@@ -258,10 +315,31 @@ sitesRouter.delete('/:id', requireRole('admin'), (req, res) => {
     .all(id)
     .map((row) => row.storage_key);
 
+  const counts = {
+    issues: db.prepare('SELECT COUNT(*) AS n FROM issues WHERE site_id = ?').get(id).n,
+    messages: db.prepare('SELECT COUNT(*) AS n FROM site_messages WHERE site_id = ?').get(id).n,
+    attachments: keys.length,
+  };
+
   db.prepare('DELETE FROM sites WHERE id = ?').run(id);
   keys.forEach(removeUpload);
 
-  res.json({ ok: true, removed_images: keys.length });
+  /*
+   * Written after the delete and with no site_id, deliberately. activity rows
+   * cascade with the site, so an entry written beforehand would have been
+   * erased along with everything else - an admin could remove a domain and
+   * leave no trace anywhere that it had ever existed. This one survives,
+   * because it belongs to no site.
+   */
+  logActivity({
+    actorId: req.user.id,
+    kind: 'site_deleted',
+    field: 'domain',
+    oldValue: site.domain,
+    newValue: `${site.domain} (${counts.issues} issue(s), ${counts.messages} message(s), ${counts.attachments} file(s))`,
+  });
+
+  res.json({ ok: true, removed_images: keys.length, removed: counts });
 });
 
 /** What the column is called on screen, not what it is called in the database. */

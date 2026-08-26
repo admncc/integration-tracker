@@ -13,6 +13,11 @@ server {
     # little headroom, otherwise an upload dies with a 413 before it reaches Node.
     client_max_body_size 28M;
 
+    # certbot adds the redirect to HTTPS but not this. Uncomment once the
+    # certificate is in place and you are sure every host under this name is
+    # served over TLS - a browser remembers it for the full max-age.
+    # add_header Strict-Transport-Security "max-age=31536000" always;
+
     location / {
         proxy_pass http://127.0.0.1:4000;
         proxy_http_version 1.1;

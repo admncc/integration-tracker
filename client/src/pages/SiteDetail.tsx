@@ -60,8 +60,10 @@ export default function SiteDetail() {
     if (!site) return;
     // Only the amounts are numeric - `rpm_*_currency` is a code and must stay a string.
     const numeric = field === 'priority' || field === 'rpm_previous' || field === 'rpm_primis';
-    let value: string | number | null = raw;
-    if (numeric) {
+    let value: string | number | boolean | null = raw;
+    // `archived` is a real boolean server-side; "1" would be rejected.
+    if (field === 'archived') value = raw === '1' || raw === 'true';
+    else if (numeric) {
       if (raw.trim() === '') value = null;
       else {
         const parsed = parseDecimal(raw);
@@ -116,6 +118,7 @@ export default function SiteDetail() {
           </h1>
           <p className="text-sm text-ink-soft">
             <Badge tone={READINESS[readiness].tone as Tone}>{READINESS[readiness].label}</Badge>{' '}
+            {site.archived === 1 && <Badge tone="muted">Archived</Badge>}{' '}
             Priority {site.priority} · {openCount} open issue(s) · {doneCount} closed · added <Timestamp iso={site.created_at} />
           </p>
           {readiness === 'incomplete' && (
@@ -321,12 +324,36 @@ export default function SiteDetail() {
         </aside>
       </div>
 
+      {site.archived === 1 && can('manage_sites') && (
+        <section className="card p-4">
+          <h2 className="text-sm font-semibold">This site is archived</h2>
+          <p className="mt-1 mb-3 max-w-2xl text-sm text-ink-soft">
+            It is out of the sites list and out of the dashboard totals, but nothing was lost. Bringing it back restores
+            it exactly as it was, issues and discussion included.
+          </p>
+          <Button
+            variant="primary"
+            onClick={async () => {
+              try {
+                const { site: saved } = await api.patch<{ site: Site }>(`/sites/${site.id}`, { archived: false });
+                setSite(saved);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Could not bring this site back');
+              }
+            }}
+          >
+            Bring {site.domain} back
+          </Button>
+        </section>
+      )}
+
       {can('delete_site') && (
         <section className="rounded-xl border border-tone-red/30 bg-tone-red-bg/30 p-4">
           <h2 className="text-sm font-semibold text-tone-red">Remove this site</h2>
           <p className="mt-1 mb-3 max-w-2xl text-sm text-ink-soft">
             Deleting {site.domain} also removes its {issues.length} issue(s) including deleted ones, every comment, every
-            screenshot and the whole discussion. Archiving keeps the record and takes the domain out of the list instead.
+            attachment and the whole discussion. Archiving keeps the record and takes the domain out of the list instead -
+            it can be brought back from this page at any time.
           </p>
           <Button variant="danger" onClick={() => setConfirmRemove(true)}>
             Remove {site.domain}
@@ -342,7 +369,7 @@ export default function SiteDetail() {
           onCreated={(_count, _issue, uploadErrors) => {
             setComposing(false);
             setFilter('open');
-            if (uploadErrors?.length) setError(`The issue was created, but a screenshot did not attach: ${uploadErrors[0]}`);
+            if (uploadErrors?.length) setError(`The issue was created, but a file did not attach: ${uploadErrors[0]}`);
             load();
           }}
         />
@@ -374,9 +401,16 @@ export default function SiteDetail() {
             <Button onClick={() => { setConfirmRemove(false); setConfirmText(''); }}>Cancel</Button>
             <Button
               onClick={async () => {
-                await patchSite('archived', '1');
-                setConfirmRemove(false);
-                navigate('/sites');
+                // It used to navigate away either way, so a rejected archive
+                // was indistinguishable from a successful one.
+                try {
+                  await api.patch(`/sites/${site.id}`, { archived: true });
+                  setConfirmRemove(false);
+                  navigate('/sites');
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Could not archive this site');
+                  setConfirmRemove(false);
+                }
               }}
             >
               Archive instead
@@ -576,11 +610,48 @@ function Editable({
   );
 }
 
+/** Which vocabulary a stored value belongs to. The field decides, not the value. */
+const VALUE_MAPS: Record<string, Record<string, { label: string }>> = {
+  status_video: TRACK_STATUS,
+  status_display: TRACK_STATUS,
+  status_ads_txt: TRACK_STATUS,
+  status_ad_tag: TRACK_STATUS,
+  status_mcm: TRACK_STATUS,
+  cmp: CMP,
+  approval: APPROVAL,
+  status: ISSUE_STATUS,
+};
+
+/** Column headings as they read on screen. */
+const FIELD_LABELS: Record<string, string> = {
+  domain: 'the domain',
+  priority: 'the priority',
+  test_url: 'the test URL',
+  status_video: 'Video',
+  status_display: 'Display',
+  status_ads_txt: 'ads.txt',
+  status_ad_tag: 'Ad tag',
+  status_mcm: 'MCM',
+  cmp: 'CMP',
+  approval: 'the approval',
+  rpm_previous: 'Previous Session RPM',
+  rpm_primis: 'Primis Session RPM',
+  rpm_previous_currency: 'the previous RPM currency',
+  rpm_primis_currency: 'the Primis RPM currency',
+  managed_by: 'Managed by',
+  archived: 'the archived flag',
+};
+
 function describe(entry: ActivityEntry) {
+  /*
+   * "none" means "No CMP" in one column and "Not submitted" in another. The
+   * maps used to be merged into one lookup, so approval won and the history
+   * said cmp had been set to "Not submitted" - the audit trail stating a fact
+   * that never happened.
+   */
   const label = (value: string | null) => {
     if (!value) return '-';
-    const map = { ...TRACK_STATUS, ...CMP, ...APPROVAL, ...ISSUE_STATUS } as Record<string, { label: string }>;
-    return map[value]?.label ?? value;
+    return VALUE_MAPS[entry.field ?? '']?.[value]?.label ?? value;
   };
 
   switch (entry.kind) {
@@ -598,16 +669,21 @@ function describe(entry: ActivityEntry) {
       return <>restored the issue "{entry.new_value}"</>;
     case 'message_posted':
       return <>wrote in the discussion: "{entry.new_value}"</>;
+    case 'site_deleted':
+      return <>deleted the domain {entry.new_value}</>;
     case 'issue_status':
       return (
         <>
-          moved an issue to <Badge tone="slate">{label(entry.new_value)}</Badge>
+          moved an issue to{' '}
+          <Badge tone="slate">
+            {ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value}
+          </Badge>
         </>
       );
     default:
       return (
         <>
-          changed <span className="text-ink">{entry.field}</span> from {label(entry.old_value)} to{' '}
+          changed <span className="text-ink">{FIELD_LABELS[entry.field ?? ''] ?? entry.field}</span> from {label(entry.old_value)} to{' '}
           <span className="text-ink">{label(entry.new_value)}</span>
         </>
       );

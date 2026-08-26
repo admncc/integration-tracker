@@ -269,6 +269,16 @@ export default function IssueCard({
                 {users.map((candidate) => (
                   <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
                 ))}
+                {/*
+                  * The list holds active people only, so an issue left with a
+                  * since-disabled assignee had no matching option: the header
+                  * said "Assigned to X" while the dropdown right below it read
+                  * "Unassigned". Keeping the name here makes the mismatch
+                  * visible and reassignable.
+                  */}
+                {issue.assignee_id != null && !users.some((candidate) => candidate.id === issue.assignee_id) && (
+                  <option value={issue.assignee_id}>{issue.assignee_name ?? 'Unknown user'} (disabled)</option>
+                )}
               </select>
               <span className="ml-2 text-ink-faint">Due</span>
               <input

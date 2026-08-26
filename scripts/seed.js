@@ -5,6 +5,7 @@
  *   node scripts/seed.js            # upsert, keeps existing data
  *   node scripts/seed.js --reset    # drop the database file first
  */
+import '../server/lib/env.js';
 import { rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -112,10 +113,25 @@ const partner = userIds['primis-qa'];
  * listed domains without resetting a status somebody has since moved by hand.
  */
 const upsertSite = db.prepare(`
-  INSERT INTO sites (domain, priority, test_url, status_video, status_display, status_ads_txt, status_ad_tag, status_mcm, cmp, approval, managed_by, notes)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO sites (domain, priority, test_url, status_video, status_display, status_ads_txt, status_ad_tag, status_mcm, cmp, approval, managed_by)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(domain) DO NOTHING
 `);
+
+/**
+ * Opens a domain's discussion with one message.
+ *
+ * These used to be written into `sites.notes`, which nothing renders any more:
+ * the notes-to-discussion migration in db.js has already marked itself done by
+ * the time the seed runs, so the text was stored where no page could show it.
+ */
+function openDiscussion(rawDomain, body) {
+  const domain = normaliseDomain(rawDomain);
+  const site = domain && db.prepare('SELECT id FROM sites WHERE domain = ?').get(domain);
+  if (!site) return;
+  if (db.prepare('SELECT 1 FROM site_messages WHERE site_id = ? AND body = ?').get(site.id, body)) return;
+  db.prepare('INSERT INTO site_messages (site_id, author_id, body) VALUES (?, NULL, ?)').run(site.id, body);
+}
 
 // Domains the mail thread flags as handled by a third party - worth carrying over.
 const EXTERNALLY_MANAGED = new Set(['it-boltwise.de', 'popcorntimes.tv']);
@@ -134,8 +150,7 @@ for (const line of SHEET.split('\n')) {
     testUrl ?? '',
     parseStatus(video), parseStatus(display), parseStatus(adsTxt), parseStatus(adTag), parseStatus(mcm),
     parseCmp(cmp), parseApproval(approval),
-    EXTERNALLY_MANAGED.has(domain) ? 'External team' : '',
-    ''
+    EXTERNALLY_MANAGED.has(domain) ? 'External team' : ''
   );
   if (info.changes > 0) siteCount += 1;
 }
@@ -143,8 +158,8 @@ for (const line of SHEET.split('\n')) {
 /*
  * Live on the revenue side but absent from the Primis rollout sheet, so they are
  * tracked with every integration track still pending. Where the revenue sheet
- * carried a tracking link rather than an article URL, it goes into the notes -
- * it is not a page the partner can QA against.
+ * carried a tracking link rather than an article URL, it opens the domain's
+ * discussion - it is not a page the partner can QA against.
  */
 const REVENUE_ONLY = [
   ['wholekitchensink.com', 'Active on the revenue side. Tracking link: https://gnxm5.ttrk.io/6953101d99fa978f1afc17cd'],
@@ -162,13 +177,13 @@ for (const [rawDomain, note] of REVENUE_ONLY) {
   const info = upsertSite.run(
     domain, 99, '',
     'pending', 'pending', 'pending', 'pending', 'pending',
-    'none', 'none', '',
-    `${note} Not part of the Primis rollout list yet.`
+    'none', 'none', ''
   );
   if (info.changes > 0) extraCount += 1;
+  openDiscussion(domain, `${note} Not part of the Primis rollout list yet.`);
 }
 
-db.prepare("UPDATE sites SET notes = 'Paused on the revenue side.' WHERE domain = 'news-7.de' AND notes = ''").run();
+openDiscussion('news-7.de', 'Paused on the revenue side.');
 
 const siteId = (domain) => db.prepare('SELECT id FROM sites WHERE domain = ?').get(normaliseDomain(domain))?.id;
 const siteExists = (domain) => Boolean(db.prepare('SELECT 1 FROM sites WHERE domain = ?').get(domain));

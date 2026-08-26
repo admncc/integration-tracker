@@ -59,7 +59,16 @@ const baseIssue = {
  * Shared by the list and the CSV export so the two can never disagree about
  * what "the current view" means.
  */
-function buildIssueFilter(query) {
+function buildIssueFilter(rawQuery) {
+  /*
+   * Express turns ?site_id=1&site_id=2 into an array, which node:sqlite cannot
+   * bind - a hand-edited filter link came back as a 500. The last value wins,
+   * which is what a browser form would have sent anyway.
+   */
+  const query = Object.fromEntries(
+    Object.entries(rawQuery ?? {}).map(([key, value]) => [key, Array.isArray(value) ? value[value.length - 1] : value])
+  );
+
   const where = [];
   const params = [];
 
@@ -92,6 +101,13 @@ function buildIssueFilter(query) {
   } else if (query.site_id) {
     where.push('i.site_id = ?');
     params.push(query.site_id);
+  } else {
+    /*
+     * Issues on archived domains are out by default, so this list agrees with
+     * the dashboard card that links to it. Asking for one archived site by id
+     * still shows it, and ?archived=1 brings them all back.
+     */
+    if (query.archived !== '1') where.push('(i.site_id IS NULL OR s.archived = 0)');
   }
 
   for (const [param, column] of [
@@ -304,8 +320,12 @@ issuesRouter.post('/', (req, res) => {
 
   let domain = null;
   if (parsed.data.site_id != null) {
-    const site = db.prepare('SELECT id, domain FROM sites WHERE id = ?').get(parsed.data.site_id);
+    const site = db.prepare('SELECT id, domain, archived FROM sites WHERE id = ?').get(parsed.data.site_id);
     if (!site) return res.status(404).json({ error: 'Site not found' });
+    // An issue on an archived domain never shows up in any list or total.
+    if (site.archived) {
+      return res.status(409).json({ error: `${site.domain} is archived. Bring it back before raising issues on it.` });
+    }
     domain = site.domain;
   }
 
@@ -353,9 +373,9 @@ issuesRouter.post('/bulk', (req, res) => {
   }
 
   const sites = db
-    .prepare(`SELECT id, domain FROM sites WHERE id IN (${uniqueIds.map(() => '?').join(',')})`)
+    .prepare(`SELECT id, domain FROM sites WHERE id IN (${uniqueIds.map(() => '?').join(',')}) AND archived = 0`)
     .all(...uniqueIds);
-  if (!sites.length) return res.status(404).json({ error: 'None of those sites exist' });
+  if (!sites.length) return res.status(404).json({ error: 'None of those sites exist, or all of them are archived' });
 
   const batchId = Number(
     db.prepare('INSERT INTO batches (title, created_by) VALUES (?, ?)').run(fields.title, req.user.id).lastInsertRowid
@@ -365,6 +385,7 @@ issuesRouter.post('/bulk', (req, res) => {
     insertIssue({ ...fields, site_id: site.id, reporter_id: req.user.id, batch_id: batchId }, req.user.id, site.domain)
   );
 
+  // Archived domains land in `skipped` rather than silently receiving work.
   const missing = uniqueIds.filter((id) => !sites.some((site) => site.id === id));
   res.status(201).json({ batch_id: batchId, created: created.length, skipped: missing, issues: created });
 });

@@ -4,18 +4,29 @@ import { db } from './db.js';
 const SESSION_DAYS = 30;
 export const SESSION_COOKIE = 'it_session';
 
+/** scrypt output length. Fixed, because the comparison depends on it. */
+const KEY_BYTES = 64;
+
 export function hashPassword(plain) {
   const salt = randomBytes(16).toString('hex');
-  const hash = scryptSync(plain, salt, 64).toString('hex');
+  const hash = scryptSync(plain, salt, KEY_BYTES).toString('hex');
   return `scrypt$${salt}$${hash}`;
 }
 
 export function verifyPassword(plain, stored) {
   const [scheme, salt, hash] = String(stored).split('$');
   if (scheme !== 'scrypt' || !salt || !hash) return false;
+
   const expected = Buffer.from(hash, 'hex');
-  const actual = scryptSync(plain, salt, expected.length);
-  return timingSafeEqual(expected, actual);
+  /*
+   * Fail closed on a hash that is not a full scrypt output. The derivation used
+   * to take its length from the stored value, so an unparseable hash - a
+   * truncated column, a half-restored backup - produced two empty buffers, and
+   * timingSafeEqual calls two empty buffers equal. Every password got in.
+   */
+  if (expected.length !== KEY_BYTES) return false;
+
+  return timingSafeEqual(expected, scryptSync(plain, salt, KEY_BYTES));
 }
 
 export function createSession(userId) {

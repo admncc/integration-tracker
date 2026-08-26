@@ -166,6 +166,15 @@ export default function Issues() {
           </label>
         ))}
 
+        <label className="flex items-center gap-1.5 self-end pb-1 text-xs text-ink-soft">
+          <input
+            type="checkbox"
+            checked={params.get('archived') === '1'}
+            onChange={(event) => setFilter('archived', event.target.checked ? '1' : '')}
+          />
+          Include archived domains
+        </label>
+
         <label className="text-xs">
           <span className="mb-1 block text-ink-faint">Site</span>
           <select className="field !w-auto !py-1" value={siteId ?? ''} onChange={(event) => setFilter('site_id', event.target.value)}>
@@ -232,7 +241,8 @@ export default function Issues() {
         <IssueModal
           siteIds={siteId ? [Number(siteId)] : []}
           domains={activeSite ? [activeSite.domain] : []}
-          selectableSites={siteId ? undefined : sites}
+          // An archived domain cannot take new issues, so it is not offered.
+          selectableSites={siteId ? undefined : sites.filter((site) => site.archived === 0)}
           onClose={() => setComposing(false)}
           onCreated={(_count, _issue, uploadErrors) => {
             setComposing(false);

@@ -51,7 +51,12 @@ export default function NetworkIssues({ sites, onIssuesChanged }: { sites: Site[
   useEffect(load, [load]);
 
   useEffect(() => {
-    if (can('raise_issue')) api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users)).catch(() => setUsers([]));
+    if (can('raise_issue')) {
+      api
+        .get<{ users: User[] }>('/users')
+        .then((r) => setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0)))
+        .catch(() => setUsers([]));
+    }
   }, [can]);
 
   const activeSiteCount = sites.filter((site) => site.archived === 0 && site.priority < 99).length;

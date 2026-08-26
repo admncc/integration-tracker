@@ -54,6 +54,10 @@ SEED_PASSWORD=<a long password you choose>
 `TRUST_PROXY=1` matters: without it the app sees nginx as the client, so
 sign-in throttling counts everyone as one address.
 
+`.env` is read both by the service and by `npm run seed`, as long as you run
+them from `/opt/integration-tracker`. Anything already set in the environment
+wins over the file.
+
 ## 4. Install, build, seed
 
 ```bash
@@ -127,7 +131,8 @@ Open `https://tracker.example.com`, sign in as `admin` with the password from
 1. Settings → change your own password.
 2. Settings → create an account for each developer and for the Primis contacts.
 3. Settings → disable the seeded `dev`, `dev-extern` and `primis-qa` accounts, or
-   set fresh passwords on them.
+   set fresh passwords on them. All four were created with the same
+   `SEED_PASSWORD`, so leaving one untouched leaves a known password on the box.
 4. Settings → check the EUR/USD rate says "European Central Bank" - that
    confirms the server can reach the outside world.
 
@@ -169,6 +174,8 @@ everything you have edited alone. Take a backup before an update anyway.
 | Service restarts in a loop | `journalctl -u integration-tracker -n 50` - usually a bad `.env` line or `data/` not writable by `tracker` |
 | 502 from nginx | the service is down, or `PORT` in `.env` does not match `proxy_pass` |
 | 413 when uploading a file | `client_max_body_size` missing from the nginx server block, or below the 25 MB app limit |
+| A domain has vanished from the list | It was archived. Open it directly at `/sites/<id>`, or tick "Show archived" on the Sites page, and use "Bring it back" |
+| The dashboard and the issue list show different counts | They should not any more; both exclude archived domains. Tick "Include archived domains" on the Issues page to see the rest |
 | Sign-in says "too many attempts" for everyone | `TRUST_PROXY=1` missing from `.env` |
 | Sign-in works but every page is empty | old build: the session cookie was dropped over plain HTTP. `git pull` and rebuild |
 | Exchange rate stuck at 1.08 | the server cannot reach `ecb.europa.eu`; set the rate by hand under Settings |

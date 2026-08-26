@@ -8,11 +8,16 @@ const STATUS_PATTERNS = [
   // "n/a" first: it is the one label with no number, and the digit patterns
   // below would otherwise never see it and fall through to pending.
   [/n\/?a/i, 'na'],
-  [/^1|live/i, 'live'],
-  [/^2|qa/i, 'qa'],
-  [/^3|implem/i, 'tag_impl'],
-  [/^4|prep/i, 'tag_prep'],
-  [/^5|pending/i, 'pending'],
+  /*
+   * The word alternatives are anchored to the start of the cell. Unanchored,
+   * /^1|live/ is (^1)|(live), so "not live yet" and even "Olive" came back as
+   * Live and turned a domain green on import.
+   */
+  [/^(1\b|live)/i, 'live'],
+  [/^(2\b|qa)/i, 'qa'],
+  [/^(3\b|implem)/i, 'tag_impl'],
+  [/^(4\b|prep)/i, 'tag_prep'],
+  [/^(5\b|pending)/i, 'pending'],
 ];
 
 export function parseStatus(raw) {
@@ -39,8 +44,34 @@ export function parseApproval(raw) {
   return 'none';
 }
 
+/**
+ * A number out of a hand-formatted cell, German or English. Whichever separator
+ * comes last is the decimal point; the other one groups thousands.
+ *
+ * The old version replaced the first comma with a dot and dropped nothing else,
+ * so "1,200" became 1.2 and "1.200,50" became 1.2 - a thousandfold error in a
+ * revenue figure. The client's own parser already did this correctly; the two
+ * doors into the same field disagreed.
+ */
 export function parseNumber(raw) {
-  const value = String(raw ?? '').replace(/[^0-9.,-]/g, '').replace(',', '.');
+  const cleaned = String(raw ?? '').replace(/[^0-9.,-]/g, '');
+  if (!cleaned) return null;
+
+  const lastComma = cleaned.lastIndexOf(',');
+  const lastDot = cleaned.lastIndexOf('.');
+  let value = cleaned;
+
+  if (lastComma !== -1 && lastDot !== -1) {
+    const [decimal, grouping] = lastComma > lastDot ? [',', '.'] : ['.', ','];
+    value = cleaned.split(grouping).join('').replace(decimal, '.');
+  } else if (lastComma !== -1) {
+    // A lone separator groups thousands only when it splits the tail into
+    // exactly three digits: "1,200" is 1200, "3,13" is 3.13.
+    value = /,\d{3}$/.test(cleaned) ? cleaned.replace(',', '') : cleaned.replace(',', '.');
+  } else if (/\.\d{3}$/.test(cleaned) && cleaned.indexOf('.') === cleaned.lastIndexOf('.')) {
+    value = cleaned.replace('.', '');
+  }
+
   const n = Number.parseFloat(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -85,9 +116,19 @@ export function parseCsv(text) {
   return rows.filter((r) => r.some((cell) => cell.trim() !== ''));
 }
 
+/**
+ * A cell a spreadsheet would execute rather than display. Both exports are
+ * opened in Google Sheets, and the partner writes issue titles, descriptions
+ * and discussion bodies - so `=HYPERLINK(...)` in a title would run on the
+ * publisher's machine. A leading apostrophe makes it text again.
+ */
+function neutraliseFormula(str) {
+  return /^[=+\-@\t\r]/.test(str) ? `'${str}` : str;
+}
+
 export function toCsv(rows) {
   const escape = (value) => {
-    const str = value == null ? '' : String(value);
+    const str = neutraliseFormula(value == null ? '' : String(value));
     return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
   };
   return rows.map((row) => row.map(escape).join(',')).join('\r\n');

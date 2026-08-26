@@ -10,10 +10,16 @@ Built for the Primis rollout, but nothing in it is Primis-specific.
 ## What it does
 
 **Sites** - one row per domain, with the five tracks from the old sheet (video,
-display, ads.txt, ad tag, MCM) plus CMP, partner approval and notes. Every cell
-is editable in place, every column filterable and sortable. Domains can be
-added, archived or deleted. Clicking a domain opens its detail page, where the
-test URL sits at the top - it is the first thing either side reaches for.
+display, ads.txt, ad tag, MCM) plus CMP and partner approval. Every cell is
+editable in place, every column filterable and sortable. Domains can be added,
+archived (reversible, from the domain's own page) or deleted permanently.
+Clicking a domain opens its detail page, where the test URL sits at the top - it
+is the first thing either side reaches for.
+
+Above the table sits **network-wide**: the things that are not about one domain.
+An issue raised there is either ticked off once for the whole network, or
+created on every active domain at once so it has to be ticked off on each of
+them - the band then shows how many are done.
 
 Each domain carries a traffic light, and it means one thing everywhere in the
 tool:
@@ -48,6 +54,8 @@ The QA loop is the status flow:
 ```
 open → in progress → ready for re-check → verified
          (developer)      (developer)      (partner)
+
+          ↘ won't fix (developer or admin, terminal)
 ```
 
 A partner can reopen a verified issue; the card then shows which QA round the
@@ -78,9 +86,12 @@ is understood. Sites and issues both export back to CSV.
 | **Developer** | edit sites, work issues, hand them back for re-check |
 | **Demand partner** | raise and verify issues, set approval and the Primis RPM |
 
-The partner cannot edit track statuses or the previous-setup RPM, and a
-developer cannot verify their own fix. Both rules are enforced server-side, not
-just hidden in the interface.
+The partner cannot edit track statuses or the previous-setup RPM, and no
+developer can mark anything **verified** - only the partner or an admin can.
+Both rules are enforced server-side, not just hidden in the interface. A
+developer can close an issue as **won't fix**, which is terminal too; that is
+deliberate, so a finding the publisher disagrees with does not sit open forever,
+and it shows in the history with their name on it.
 
 ## Running it
 

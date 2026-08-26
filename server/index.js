@@ -1,3 +1,6 @@
+// First, and by itself: importing it is what loads .env into process.env.
+import './lib/env.js';
+
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { existsSync } from 'node:fs';

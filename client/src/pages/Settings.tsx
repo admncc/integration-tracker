@@ -22,6 +22,8 @@ export default function Settings() {
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<User | null>(null);
   const [notice, setNotice] = useState('');
+  /** What the dropdown shows while a change is pending or has been declined. */
+  const [roleDraft, setRoleDraft] = useState<Record<number, User['role']>>({});
 
   useEffect(() => {
     api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users));
@@ -37,11 +39,27 @@ export default function Settings() {
   }
 
   async function changeRole(target: User, role: User['role']) {
+    /*
+     * A confirmation, because this dropdown is one arrow key away from handing
+     * an internal account to the external partner's role - and a plain <select>
+     * commits on every arrow key in Chromium, which is exactly why InlineSelect
+     * defers a keyboard change elsewhere in the app.
+     */
+    if (role === target.role) return;
+    const label = ROLE_ENTRIES.find(([value]) => value === role)?.[1].label ?? role;
+    const self = target.id === user?.id ? ' This is your own account.' : '';
+    if (!window.confirm(`Make ${target.name} a ${label}?${self}`)) {
+      setRoleDraft((current) => ({ ...current, [target.id]: target.role }));
+      return;
+    }
+
     try {
       const { user: saved } = await api.patch<{ user: User }>(`/users/${target.id}`, { role });
       setUsers((current) => current.map((u) => (u.id === saved.id ? saved : u)));
+      setRoleDraft((current) => ({ ...current, [saved.id]: saved.role }));
     } catch (err) {
       setNotice(err instanceof Error ? err.message : 'Could not change the role');
+      setRoleDraft((current) => ({ ...current, [target.id]: target.role }));
     }
   }
 
@@ -85,7 +103,15 @@ export default function Settings() {
                 <td className="px-4 py-2 font-mono text-xs">{row.username}</td>
                 <td className="px-4 py-2 text-ink-soft">{row.company || '-'}</td>
                 <td className="px-4 py-2">
-                  <select className="field !w-auto !py-1 text-xs" value={row.role} onChange={(event) => changeRole(row, event.target.value as User['role'])}>
+                  <select
+                    className="field !w-auto !py-1 text-xs"
+                    value={roleDraft[row.id] ?? row.role}
+                    onChange={(event) => {
+                      const next = event.target.value as User['role'];
+                      setRoleDraft((current) => ({ ...current, [row.id]: next }));
+                      changeRole(row, next);
+                    }}
+                  >
                     {ROLE_ENTRIES.map(([value, meta]) => (
                       <option key={value} value={value}>{meta.label}</option>
                     ))}
