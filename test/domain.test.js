@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { missingTracks, rpmUplift, siteCompletion, siteReadiness, toBase, formatMoney } from '../shared/domain.js';
+import { formatUplift, missingTracks, rpmUplift, siteCompletion, siteReadiness, toBase, formatMoney } from '../shared/domain.js';
 
 test('toBase leaves EUR alone and divides USD by the rate', () => {
   assert.equal(toBase(5, 'EUR', 1.1662), 5);
@@ -69,4 +69,20 @@ test('priority 99 is inactive whatever the tracks say', () => {
 test('missingTracks names exactly what is holding a site back', () => {
   assert.deepEqual(missingTracks(ALL_LIVE), []);
   assert.deepEqual(missingTracks({ ...ALL_LIVE, status_display: 'qa', status_mcm: 'pending' }), ['Display', 'MCM']);
+});
+
+test('formatUplift never rounds onto a landmark it has not reached', () => {
+  // -100% means the revenue went to zero; -99.99% does not.
+  assert.equal(formatUplift(-99.99), '-99.99%');
+  assert.equal(formatUplift(-100), '-100%');
+  assert.equal(formatUplift(0.4), '+0.4%');
+  assert.equal(formatUplift(0), '0%');
+  assert.equal(formatUplift(-0.004), '-0.00%');
+});
+
+test('formatUplift rounds where the decimals carry nothing', () => {
+  assert.equal(formatUplift(159644.2), '+159644%');
+  assert.equal(formatUplift(21), '+21%');
+  assert.equal(formatUplift(20.6), '+21%');
+  assert.equal(formatUplift(-25), '-25%');
 });

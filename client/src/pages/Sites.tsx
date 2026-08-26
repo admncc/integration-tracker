@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Site, TrackStatus } from '../lib/types';
-import { APPROVAL, CMP, READINESS, TRACKS, TRACK_STATUS, formatMoney, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
+import { APPROVAL, CMP, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
 import { Badge, Button, CurrencyToggle, Empty, Field, InlineSelect, InlineText, Modal, Spinner, type Tone } from '../components/ui';
 import IssueModal from '../components/IssueModal';
 
@@ -24,8 +24,10 @@ type Column = {
   tones?: Record<string, Tone>;
   /** Relative share of the table width; the percentages are computed from these. */
   weight: number;
-  /** Dropped on a narrow screen, where twelve columns cannot all stay readable. */
+  /** Dropped below NARROW_VIEWPORT. */
   secondary?: boolean;
+  /** Dropped below TIGHT_VIEWPORT, where even the short labels stop fitting. */
+  tier?: 2;
 };
 
 /** The checkbox column has no descriptor but still needs a share. */
@@ -38,6 +40,13 @@ const SELECT_COLUMN_WEIGHT = 2.5;
  */
 const NARROW_VIEWPORT = 1280;
 
+/**
+ * Below this even "New" and "Approved" stop fitting their columns. Both are on
+ * the domain's own page, so they give way rather than render as "N..." where
+ * New and None become the same thing.
+ */
+const TIGHT_VIEWPORT = 1120;
+
 const tonesOf = (map: Record<string, { tone: string }>) =>
   Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v.tone as Tone]));
 
@@ -48,23 +57,49 @@ const tonesOf = (map: Record<string, { tone: string }>) =>
  * on the site's detail page instead.
  */
 const COLUMNS: Column[] = [
-  { key: 'priority', label: 'Prio', kind: 'number', weight: 3.5 },
-  { key: 'domain', label: 'Domain', kind: 'text', weight: 16 },
+  { key: 'priority', label: 'Prio', kind: 'number', weight: 4 },
+  { key: 'domain', label: 'Domain', kind: 'text', weight: 11.5 },
   ...TRACKS.map((track) => ({
     key: track.key,
     label: track.label,
     kind: 'enum' as const,
     options: STATUS_OPTIONS,
     tones: tonesOf(TRACK_STATUS),
-    weight: 8.1,
+    weight: 9,
   })),
-  { key: 'cmp', label: 'CMP', kind: 'enum', options: CMP_OPTIONS, tones: tonesOf(CMP), weight: 5.5 },
-  { key: 'approval', label: 'Approval', kind: 'enum', options: APPROVAL_OPTIONS, tones: tonesOf(APPROVAL), weight: 8 },
-  { key: 'open_issues', label: 'Issues', kind: 'issues', weight: 6 },
+  { key: 'cmp', label: 'CMP', kind: 'enum', options: CMP_OPTIONS, tones: tonesOf(CMP), weight: 5.5, tier: 2 },
+  { key: 'approval', label: 'Approval', kind: 'enum', options: APPROVAL_OPTIONS, tones: tonesOf(APPROVAL), weight: 8.5, tier: 2 },
+  { key: 'open_issues', label: 'Issues', kind: 'issues', weight: 5.5 },
   { key: 'rpm_previous', label: 'Prev. RPM', kind: 'money', weight: 6.5, secondary: true },
   { key: 'rpm_primis', label: 'Primis RPM', kind: 'money', weight: 6.5, secondary: true },
-  { key: 'rpm_uplift', label: 'Δ', kind: 'uplift', weight: 5, secondary: true },
+  { key: 'rpm_uplift', label: 'Δ', kind: 'uplift', weight: 4.5, secondary: true },
 ];
+
+/**
+ * Accepts what a person actually types or pastes out of a spreadsheet:
+ * "3,14", "1 234,56", "1.234,56" and "1,234.56" all mean the same figure.
+ * Returns null when the text is not a number at all, so the caller can say so
+ * instead of storing nothing.
+ */
+export function parseDecimal(raw: string): number | null {
+  let text = raw.trim().replace(/[\s\u00a0']/g, '');
+  if (!text) return null;
+
+  const lastComma = text.lastIndexOf(',');
+  const lastDot = text.lastIndexOf('.');
+  if (lastComma !== -1 && lastDot !== -1) {
+    // Whichever comes last is the decimal separator; the other groups thousands.
+    const [decimal, grouping] = lastComma > lastDot ? [',', '.'] : ['.', ','];
+    text = text.split(grouping).join('').replace(decimal, '.');
+  } else if (lastComma !== -1) {
+    // A lone comma is a decimal separator unless it groups three digits.
+    text = /^\d{1,3}(,\d{3})+$/.test(text) ? text.split(',').join('') : text.replace(',', '.');
+  }
+
+  if (!/^-?\d*\.?\d+$/.test(text)) return null;
+  const value = Number(text);
+  return Number.isFinite(value) ? value : null;
+}
 
 /** Fields the partner may change; everything else is publisher-owned. */
 const PARTNER_WRITABLE = new Set(['approval', 'rpm_primis', 'rpm_primis_currency', 'notes']);
@@ -86,14 +121,19 @@ export default function Sites() {
 
   // Hiding the revenue columns beats rendering "N..." where "New" and "None"
   // become indistinguishable; the figures are still on each domain's page.
-  const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW_VIEWPORT);
+  const [width, setWidth] = useState(() => window.innerWidth);
   useEffect(() => {
-    const onResize = () => setNarrow(window.innerWidth < NARROW_VIEWPORT);
+    const onResize = () => setWidth(window.innerWidth);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  const columns = useMemo(() => COLUMNS.filter((column) => !(narrow && column.secondary)), [narrow]);
+  const narrow = width < NARROW_VIEWPORT;
+  const tight = width < TIGHT_VIEWPORT;
+  const columns = useMemo(
+    () => COLUMNS.filter((column) => !(narrow && column.secondary) && !(tight && column.tier === 2)),
+    [narrow, tight]
+  );
   const widthOf = useMemo(() => {
     const total = SELECT_COLUMN_WEIGHT + columns.reduce((sum, column) => sum + column.weight, 0);
     return (weight: number) => `${((weight / total) * 100).toFixed(3)}%`;
@@ -120,7 +160,21 @@ export default function Sites() {
   async function patchSite(site: Site, field: string, raw: string) {
     // Only the amounts are numeric - `rpm_*_currency` is a code and must stay a string.
     const numeric = field === 'priority' || field === 'rpm_previous' || field === 'rpm_primis';
-    const value = numeric ? (raw === '' ? null : Number(String(raw).replace(',', '.'))) : raw;
+    let value: string | number | null = raw;
+    if (numeric) {
+      if (raw.trim() === '') value = null;
+      else {
+        const parsed = parseDecimal(raw);
+        if (parsed == null) {
+          // NaN used to reach the server as JSON null, wiping the stored figure
+          // without a word.
+          setNotice({ tone: 'red', text: `"${raw}" is not a number. The previous value was kept.` });
+          setSites((current) => [...current]);
+          return;
+        }
+        value = parsed;
+      }
+    }
     const previous = sites;
     setSites((current) => current.map((s) => (s.id === site.id ? { ...s, [field]: value } : s)));
     try {
@@ -135,7 +189,7 @@ export default function Sites() {
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     const rows = sites.filter((site) => {
-      if (term && !`${site.domain} ${site.notes} ${site.managed_by}`.toLowerCase().includes(term)) return false;
+      if (term && !`${site.domain} ${site.managed_by}`.toLowerCase().includes(term)) return false;
       if (readiness !== 'all' && siteReadiness(site) !== readiness) return false;
 
       return Object.entries(filters).every(([key, value]) => {
@@ -194,6 +248,10 @@ export default function Sites() {
     });
   }, [sites, filters, search, sort, eurUsd, readiness]);
 
+  // Selecting 62 rows and then filtering to one used to leave a banner saying
+  // "62 selected" over a single row, with the bulk issue hitting all 62.
+  const hiddenSelected = [...selected].filter((id) => !visible.some((site) => site.id === id)).length;
+
   const activeFilters = Object.values(filters).filter(Boolean).length + (search ? 1 : 0) + (readiness === 'all' ? 0 : 1);
 
   const readinessCounts = useMemo(() => {
@@ -229,13 +287,13 @@ export default function Sites() {
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <input
             className="field w-56"
-            placeholder="Search domain, notes..."
+            placeholder="Search domain or owner..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
           {narrow && (
-            <span className="text-xs text-ink-faint" title="Open a domain to see and edit its RPM figures">
-              RPM columns hidden on this width
+            <span className="text-xs text-ink-faint" title="Open a domain to see and edit the hidden columns">
+              {tight ? 'RPM, CMP and approval hidden' : 'RPM columns hidden'} on this width
             </span>
           )}
           {activeFilters > 0 && (
@@ -288,10 +346,21 @@ export default function Sites() {
 
       {selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-brand/30 bg-brand-soft px-3 py-2 text-sm">
-          <span className="font-medium text-brand-ink">{selected.size} selected</span>
+          <span className="font-medium text-brand-ink">
+            {selected.size} selected
+            {hiddenSelected > 0 && `, ${hiddenSelected} of them not in the current filter`}
+          </span>
           <Button size="sm" variant="primary" onClick={() => setBulkOpen(true)}>
             Raise one issue on all
           </Button>
+          {hiddenSelected > 0 && (
+            <Button
+              size="sm"
+              onClick={() => setSelected(new Set(visible.filter((site) => selected.has(site.id)).map((site) => site.id)))}
+            >
+              Keep only the {selected.size - hiddenSelected} visible
+            </Button>
+          )}
           <Button size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
         </div>
       )}
@@ -438,10 +507,9 @@ function Cell({
         className={`block truncate text-xs font-medium tabular-nums ${
           uplift > 0 ? 'text-tone-green' : uplift < 0 ? 'text-tone-red' : 'text-ink-soft'
         }`}
-        title={`Primis vs. the previous setup, converted to EUR`}
+        title={`Primis vs. the previous setup, converted to EUR: ${formatUplift(uplift)}`}
       >
-        {uplift > 0 ? '+' : ''}
-        {uplift.toFixed(0)}%
+        {formatUplift(uplift)}
       </span>
     );
   }
@@ -487,12 +555,14 @@ function Cell({
   if (column.key === 'domain') {
     const readiness = siteReadiness(site);
     const missing = missingTracks(site);
-    const title =
+    // The name comes first: a truncated domain had no way to be read in full.
+    const state =
       readiness === 'inactive'
-        ? 'Priority 99 - not part of the active rollout'
+        ? 'priority 99, not part of the active rollout'
         : readiness === 'live'
-          ? 'All five tracks are Live'
-          : `Not live yet: ${missing.join(', ')}`;
+          ? 'all five tracks are Live'
+          : `not live yet: ${missing.join(', ')}`;
+    const title = `${site.domain} - ${state}`;
 
     return (
       <Link
@@ -564,7 +634,7 @@ function ColumnFilter({ column, value, onChange }: { column: Column; value: stri
   return (
     <input
       className="field !py-1 text-xs"
-      placeholder={column.kind === 'number' ? '#' : 'Filter...'}
+      placeholder={column.kind === 'number' ? '#' : 'Filter'}
       value={value}
       aria-label={`Filter ${column.label}`}
       onChange={(event) => onChange(event.target.value)}
@@ -582,9 +652,11 @@ function AddSiteModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
     setBusy(true);
     setError('');
     try {
+      // The server normalises; the dialog used to do its own case-sensitive
+      // version of it and turned "HTTP://WWW.Baz.DE/a" into the string "HTTP:".
       const { site } = await api.post<{ site: Site }>('/sites', {
         ...form,
-        domain: form.domain.trim().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0],
+        domain: form.domain.trim(),
         priority: Number(form.priority) || 99,
       });
       onCreated({ ...site, open_issues: 0, awaiting_qa: 0, total_issues: 0 });

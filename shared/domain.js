@@ -127,6 +127,24 @@ export function toBase(value, currency, eurUsd = DEFAULT_EUR_USD) {
  * Relative change from the previous setup to Primis, both normalised to EUR.
  * Null when a figure is missing or the old value was zero.
  */
+/**
+ * Formats a percentage without letting rounding state something untrue.
+ * -100% means the revenue went to zero and 0% means nothing changed, so a value
+ * that has not actually reached either keeps decimals until it no longer reads
+ * as one of them. Above 1000% the decimals stop carrying meaning.
+ */
+export function formatUplift(uplift) {
+  const sign = uplift > 0 ? '+' : '';
+  if (Math.abs(uplift) >= 1000) return `${sign}${Math.round(uplift)}%`;
+
+  for (const digits of [0, 1, 2]) {
+    const text = uplift.toFixed(digits);
+    const shown = Number(text);
+    if ((shown !== -100 && shown !== 0) || shown === uplift) return `${sign}${text}%`;
+  }
+  return `${sign}${uplift.toFixed(2)}%`;
+}
+
 export function rpmUplift(site, eurUsd = DEFAULT_EUR_USD) {
   const previous = toBase(site.rpm_previous, site.rpm_previous_currency ?? BASE_CURRENCY, eurUsd);
   const primis = toBase(site.rpm_primis, site.rpm_primis_currency ?? BASE_CURRENCY, eurUsd);

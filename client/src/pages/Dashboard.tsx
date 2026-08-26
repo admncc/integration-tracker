@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { RpmRow, Stats } from '../lib/types';
-import { BASE_CURRENCY, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY, TRACK_STATUS, formatMoney } from '@shared/domain.js';
+import { BASE_CURRENCY, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY, TRACK_STATUS, formatMoney, formatUplift } from '@shared/domain.js';
 import { Badge, Empty, Spinner, TONE_BG, TONE_TEXT, Timestamp, type Tone } from '../components/ui';
 
 export default function Dashboard() {
@@ -219,8 +219,7 @@ function RpmList({ title, rows }: { title: string; rows: RpmRow[] }) {
               {formatMoney(row.rpm_previous, row.rpm_previous_currency)} → {formatMoney(row.rpm_primis, row.rpm_primis_currency)}
             </span>
             <Badge tone={row.uplift > 0 ? 'green' : row.uplift < 0 ? 'red' : 'slate'}>
-              {row.uplift > 0 ? '+' : ''}
-              {row.uplift.toFixed(0)}%
+              {formatUplift(row.uplift)}
             </Badge>
           </li>
         ))}

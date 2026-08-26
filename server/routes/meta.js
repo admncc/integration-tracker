@@ -308,8 +308,11 @@ metaRouter.post('/import', requireRole('admin'), (req, res) => {
   }
 
   const existing = new Map(db.prepare('SELECT id, domain FROM sites').all().map((s) => [s.domain, s.id]));
-  const created = sites.filter((s) => !existing.has(s.domain)).map((s) => s.domain);
-  const updated = sites.filter((s) => existing.has(s.domain)).map((s) => s.domain);
+  // A domain repeated across rows is one site, so it is reported once. The last
+  // row still wins in the table, which is what a spreadsheet reader expects.
+  const domains = [...new Set(sites.map((s) => s.domain))];
+  const created = domains.filter((domain) => !existing.has(domain));
+  const updated = domains.filter((domain) => existing.has(domain));
 
   if (parsed.data.dry_run) {
     return res.json({ dry_run: true, columns, created, updated, skipped });

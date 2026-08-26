@@ -59,13 +59,48 @@ export function InlineSelect<T extends string>({
   compact?: boolean;
 }) {
   const current = options.find((o) => o.value === value);
+  const keyboardDriven = useRef(false);
+  const pending = useRef<T | null>(null);
+
   return (
     <div className={`relative ${compact ? 'block' : 'inline-block'}`}>
       <select
         value={value}
         disabled={disabled}
         title={title ?? current?.label}
-        onChange={(event) => onChange(event.target.value as T)}
+        /*
+         * Chromium fires `change` for every arrow key on a closed select, so
+         * tabbing across the table used to write a new status per keypress.
+         * A keyboard change is held until the field is left or Enter is pressed;
+         * a click still commits immediately.
+         */
+        onKeyDown={(event) => {
+          if (event.key === 'ArrowDown' || event.key === 'ArrowUp') keyboardDriven.current = true;
+          if (event.key === 'Enter' && pending.current !== null) {
+            const next = pending.current;
+            pending.current = null;
+            keyboardDriven.current = false;
+            onChange(next);
+          }
+          if (event.key === 'Escape' && pending.current !== null) {
+            pending.current = null;
+            keyboardDriven.current = false;
+            event.currentTarget.value = value;
+          }
+        }}
+        onBlur={() => {
+          if (pending.current !== null) {
+            const next = pending.current;
+            pending.current = null;
+            keyboardDriven.current = false;
+            onChange(next);
+          }
+        }}
+        onChange={(event) => {
+          const next = event.target.value as T;
+          if (keyboardDriven.current) pending.current = next;
+          else onChange(next);
+        }}
         /*
          * Only a table cell forces the select to its column width. Everywhere
          * else `w-full` inside an inline-block wrapper collapses it onto its own

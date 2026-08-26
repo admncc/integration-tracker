@@ -34,17 +34,16 @@ const siteFields = {
   cmp: z.enum(Object.keys(CMP)),
   approval: z.enum(Object.keys(APPROVAL)),
   // An empty string means "clear it"; z.coerce.number() would turn that into 0.
-  rpm_previous: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number({ invalid_type_error: 'An RPM must be a number' }).min(0, 'An RPM cannot be negative').nullable()),
-  rpm_primis: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number({ invalid_type_error: 'An RPM must be a number' }).min(0, 'An RPM cannot be negative').nullable()),
+  rpm_previous: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number({ invalid_type_error: 'An RPM must be a number' }).min(0, 'An RPM cannot be negative').max(10000, 'An RPM above 10000 looks like a typo').nullable()),
+  rpm_primis: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number({ invalid_type_error: 'An RPM must be a number' }).min(0, 'An RPM cannot be negative').max(10000, 'An RPM above 10000 looks like a typo').nullable()),
   rpm_previous_currency: z.enum(CURRENCIES),
   rpm_primis_currency: z.enum(CURRENCIES),
   managed_by: z.string().trim().max(190),
-  notes: z.string().trim().max(5000),
   archived: z.coerce.boolean(),
 };
 
-const createSchema = z.object(siteFields).partial().required({ domain: true });
-const updateSchema = z.object(siteFields).partial();
+const createSchema = z.object(siteFields).partial().required({ domain: true }).strict();
+const updateSchema = z.object(siteFields).partial().strict();
 
 /** Sites plus their open-issue counts, so the list view needs a single query. */
 function listSites({ includeArchived = false } = {}) {
@@ -225,7 +224,7 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
   }
 
   // The partner owns approval and its own RPM figure; the rest is the publisher's.
-  const partnerWritable = new Set(['approval', 'rpm_primis', 'rpm_primis_currency', 'notes']);
+  const partnerWritable = new Set(['approval', 'rpm_primis', 'rpm_primis_currency']);
   if (req.user.role === 'partner') {
     const forbidden = Object.keys(parsed.data).filter((field) => !partnerWritable.has(field));
     if (forbidden.length) {
@@ -265,12 +264,39 @@ sitesRouter.delete('/:id', requireRole('admin'), (req, res) => {
   res.json({ ok: true, removed_images: keys.length });
 });
 
+/** What the column is called on screen, not what it is called in the database. */
+const FIELD_LABELS = {
+  domain: 'Domain',
+  priority: 'Prio',
+  test_url: 'Test URL',
+  status_video: 'Video',
+  status_display: 'Display',
+  status_ads_txt: 'ads.txt',
+  status_ad_tag: 'Ad tag',
+  status_mcm: 'MCM',
+  cmp: 'CMP',
+  approval: 'Approval',
+  rpm_previous: 'Previous Session RPM',
+  rpm_primis: 'Primis Session RPM',
+  rpm_previous_currency: 'Previous RPM currency',
+  rpm_primis_currency: 'Primis RPM currency',
+  managed_by: 'Managed by',
+  archived: 'Archived',
+};
+
 /** Zod's first concrete complaint beats a generic "Invalid site data". */
 function firstMessage(error) {
   const issue = error.issues?.[0];
   if (!issue) return 'Invalid site data';
-  const field = issue.path?.join('.');
-  return field && !issue.message.toLowerCase().includes(field.replace('_', ' ')) ? `${field}: ${issue.message}` : issue.message;
+
+  if (issue.code === 'unrecognized_keys') {
+    return `Unknown field: ${issue.keys.join(', ')}`;
+  }
+
+  const field = issue.path?.[0];
+  const label = FIELD_LABELS[field];
+  if (!label) return issue.message;
+  return issue.message.toLowerCase().includes(label.toLowerCase()) ? issue.message : `${label}: ${issue.message}`;
 }
 
 /** SQLite has no boolean type and rejects `undefined`. */

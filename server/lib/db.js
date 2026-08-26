@@ -207,10 +207,13 @@ db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)
 
 /*
  * The per-site notes field became a discussion thread. Anything already written
- * there is carried over as the opening message so no context is lost, and the
- * column is left empty for the CSV importer to keep using.
+ * there is carried over as the opening message, once. This used to run on every
+ * boot, so a note written through the API afterwards was silently emptied by the
+ * next restart.
  */
-if (db.prepare("SELECT COUNT(*) AS n FROM sites WHERE notes != ''").get().n > 0) {
+const NOTES_MIGRATED = 'notes_migrated_to_discussion';
+const notesAlreadyMigrated = db.prepare('SELECT value FROM settings WHERE key = ?').get(NOTES_MIGRATED)?.value === '1';
+if (!notesAlreadyMigrated) {
   const carried = db.prepare("SELECT id, notes FROM sites WHERE notes != ''").all();
   const insert = db.prepare('INSERT INTO site_messages (site_id, author_id, body) VALUES (?, NULL, ?)');
   const clear = db.prepare("UPDATE sites SET notes = '' WHERE id = ?");
@@ -219,6 +222,8 @@ if (db.prepare("SELECT COUNT(*) AS n FROM sites WHERE notes != ''").get().n > 0)
     if (!already) insert.run(site.id, site.notes);
     clear.run(site.id);
   }
+  db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+    .run(NOTES_MIGRATED, '1');
 }
 
 /** Small key/value store for the handful of instance-wide settings. */

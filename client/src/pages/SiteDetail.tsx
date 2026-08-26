@@ -3,10 +3,11 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { ActivityEntry, Issue, Site, SiteMessage, User } from '../lib/types';
-import { APPROVAL, CMP, CURRENCIES, ISSUE_STATUS, READINESS, TRACKS, TRACK_STATUS, formatMoney, missingTracks, rpmUplift, siteCompletion, siteReadiness } from '@shared/domain.js';
+import { APPROVAL, CMP, CURRENCIES, ISSUE_STATUS, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteCompletion, siteReadiness } from '@shared/domain.js';
 import { Badge, Button, Empty, InlineSelect, InlineText, Modal, Spinner, Timestamp, type Tone } from '../components/ui';
 import IssueCard from '../components/IssueCard';
 import IssueModal from '../components/IssueModal';
+import { parseDecimal } from './Sites';
 import SiteChat from '../components/SiteChat';
 
 const STATUS_OPTIONS = Object.entries(TRACK_STATUS).map(([value, meta]) => ({ value, label: meta.label }));
@@ -59,7 +60,19 @@ export default function SiteDetail() {
     if (!site) return;
     // Only the amounts are numeric - `rpm_*_currency` is a code and must stay a string.
     const numeric = field === 'priority' || field === 'rpm_previous' || field === 'rpm_primis';
-    const value = numeric ? (raw === '' ? null : Number(String(raw).replace(',', '.'))) : raw;
+    let value: string | number | null = raw;
+    if (numeric) {
+      if (raw.trim() === '') value = null;
+      else {
+        const parsed = parseDecimal(raw);
+        if (parsed == null) {
+          setError(`"${raw}" is not a number. The previous value was kept.`);
+          setSite({ ...site });
+          return;
+        }
+        value = parsed;
+      }
+    }
     const previous = site;
     setSite({ ...site, [field]: value } as Site);
     try {
@@ -212,8 +225,7 @@ export default function SiteDetail() {
                     </span>
                   ) : (
                     <Badge tone={uplift > 0 ? 'green' : uplift < 0 ? 'red' : 'slate'}>
-                      {uplift > 0 ? '+' : ''}
-                      {uplift.toFixed(1)}%
+                      {formatUplift(uplift)}
                     </Badge>
                   )}
                   <p className="mt-1 text-xs text-ink-faint">

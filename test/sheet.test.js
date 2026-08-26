@@ -27,6 +27,15 @@ test('normaliseDomain strips scheme, www and path', () => {
   assert.equal(normaliseDomain('  MAIKIKII.de '), 'maikikii.de');
 });
 
+test('normaliseDomain drops a port and punycodes an international name', () => {
+  assert.equal(normaliseDomain('https://www.Example-Port.de:8080/a/b?x=1'), 'example-port.de');
+  assert.equal(normaliseDomain('example.de:8443'), 'example.de');
+  assert.equal(normaliseDomain('HTTP://WWW.Baz.DE/a'), 'baz.de');
+  assert.equal(normaliseDomain('example.de.'), 'example.de');
+  // The two spellings of one domain must not become two rows.
+  assert.equal(normaliseDomain('m\u00fcnchen.de'), normaliseDomain('xn--mnchen-3ya.de'));
+});
+
 test('normaliseDomain rejects anything that is not a domain', () => {
   assert.equal(normaliseDomain('not a domain'), '');
   assert.equal(normaliseDomain(''), '');

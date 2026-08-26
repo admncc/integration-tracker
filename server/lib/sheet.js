@@ -207,10 +207,23 @@ export function csvToSites(text) {
   return { sites, columns, skipped };
 }
 
-/** `https://www.Example.de/path` and `example.de` must not become two rows. */
+/**
+ * `https://www.Example.de:8080/path`, `Example.de` and `example.de` must all be
+ * the same row. The URL parser does the work: it lower-cases, drops the port,
+ * the path and the query, and converts an internationalised name to its
+ * punycode form, so "münchen.de" and "xn--mnchen-3ya.de" no longer split in two.
+ */
 export function normaliseDomain(raw) {
-  let value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '').trim();
   if (!value) return '';
-  value = value.replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0].split('?')[0];
-  return /^[a-z0-9.-]+\.[a-z]{2,}$/.test(value) ? value : '';
+
+  let host;
+  try {
+    host = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(value) ? value : `http://${value}`).hostname;
+  } catch {
+    return '';
+  }
+
+  host = host.toLowerCase().replace(/^www\./, '').replace(/\.$/, '');
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}$/.test(host) ? host : '';
 }

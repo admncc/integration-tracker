@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useLocation } from 'react-router-dom';
 import { api } from './api';
 import type { User } from './types';
 import { DEFAULT_EUR_USD, FX_SETTING_KEY } from '@shared/domain.js';
@@ -52,13 +53,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('tracker:signed-out', onSignedOut);
   }, []);
 
+  /*
+   * Refetched on every navigation, not once per sign-in: a rate changed in
+   * Settings used to leave every delta on an open Sites list reading the old
+   * number until a full browser reload.
+   */
+  const location = useLocation();
   useEffect(() => {
     if (!user) return;
     api
       .get<{ settings: Record<string, unknown> }>('/settings')
       .then((r) => setEurUsd(Number(r.settings[FX_SETTING_KEY]) || DEFAULT_EUR_USD))
       .catch(() => setEurUsd(DEFAULT_EUR_USD));
-  }, [user]);
+  }, [user, location.pathname]);
 
   const signIn = useCallback(async (identifier: string, password: string) => {
     setExpired(false);
