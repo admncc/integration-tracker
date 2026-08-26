@@ -57,7 +57,7 @@ export default function Settings() {
             <h2 className="text-sm font-semibold">People</h2>
             <p className="text-xs text-ink-soft">
               {can('manage_users')
-                ? 'Create an account for each developer and for the partner’s QA contacts.'
+                ? "Create an account for each developer and for the partner's QA contacts."
                 : 'Only an admin can add or change accounts.'}
             </p>
           </div>
@@ -215,7 +215,7 @@ function NewUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
         <div className="flex justify-end gap-2">
           <Button type="button" onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Creating…' : 'Create user'}</Button>
+          <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Creating...' : 'Create user'}</Button>
         </div>
       </form>
     </Modal>
@@ -320,7 +320,7 @@ function ExchangeRatePanel() {
         }}
         className="flex flex-wrap items-end gap-2"
       >
-        <Field label="1 EUR equals … USD">
+        <Field label="1 EUR equals ... USD">
           <input
             className="field !w-32 tabular-nums"
             type="number"
@@ -336,7 +336,7 @@ function ExchangeRatePanel() {
           <>
             <Button type="submit" disabled={busy}>Save manually</Button>
             <Button type="button" variant="primary" onClick={refreshNow} disabled={busy}>
-              {busy ? 'Fetching…' : 'Fetch from ECB now'}
+              {busy ? 'Fetching...' : 'Fetch from ECB now'}
             </Button>
           </>
         )}
@@ -436,9 +436,9 @@ function ImportPanel() {
       <h2 className="text-sm font-semibold">Import from the Google Sheet</h2>
       <p className="mb-3 text-xs text-ink-soft">
         In Sheets: File → Download → CSV, then paste the contents here. Rows are matched by domain, so re-importing updates
-        existing sites instead of duplicating them. Status wording from the sheet (“1 - LIVE”, “4 - Tags prep”) is recognised.
+        existing sites instead of duplicating them. Status wording from the sheet ("1 - LIVE", "4 - Tags prep") is recognised.
       </p>
-      <textarea className="field min-h-32 font-mono text-xs" value={csv} onChange={(e) => setCsv(e.target.value)} placeholder="PRIO,Domain,STATUS (video),…" />
+      <textarea className="field min-h-32 font-mono text-xs" value={csv} onChange={(e) => setCsv(e.target.value)} placeholder="PRIO,Domain,STATUS (video),..." />
       <div className="mt-2 flex gap-2">
         <Button onClick={() => run(true)} disabled={!csv.trim() || busy}>Preview</Button>
         <Button variant="primary" onClick={() => run(false)} disabled={!csv.trim() || busy}>Import</Button>

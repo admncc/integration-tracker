@@ -73,7 +73,7 @@ Quick check before setting up the service:
 ```bash
 sudo -u tracker -H env NODE_ENV=production PORT=4000 node server/index.js
 # expect: "Integration Tracker API on http://localhost:4000"
-#         "FX rate 1.16… USD/EUR (ECB …)"
+#         "FX rate 1.16... USD/EUR (ECB ...)"
 # Ctrl-C to stop
 ```
 

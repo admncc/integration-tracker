@@ -132,7 +132,7 @@ export default function SiteChat({
         <textarea
           ref={composer}
           className="field min-h-20"
-          placeholder="Ask something, or answer a question…"
+          placeholder="Ask something, or answer a question..."
           value={body}
           onChange={(event) => setBody(event.target.value)}
           onKeyDown={(event) => {
@@ -147,7 +147,7 @@ export default function SiteChat({
         <div className="flex items-center gap-2">
           <span className="text-xs text-ink-faint">Enter sends · Shift+Enter for a new line</span>
           <Button type="submit" size="sm" variant="primary" className="ml-auto" disabled={busy || !body.trim()}>
-            {busy ? 'Sending…' : 'Send'}
+            {busy ? 'Sending...' : 'Send'}
           </Button>
         </div>
 

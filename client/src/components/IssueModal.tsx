@@ -102,7 +102,7 @@ export default function IssueModal({
             <div className="space-y-2">
               <input
                 className="field"
-                placeholder="Filter domains…"
+                placeholder="Filter domains..."
                 value={siteSearch}
                 onChange={(event) => setSiteSearch(event.target.value)}
               />
@@ -266,7 +266,7 @@ export default function IssueModal({
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" disabled={busy}>
-            {busy ? 'Creating…' : bulk ? `Create ${siteIds.length} issues` : 'Create issue'}
+            {busy ? 'Creating...' : bulk ? `Create ${siteIds.length} issues` : 'Create issue'}
           </Button>
         </div>
       </form>

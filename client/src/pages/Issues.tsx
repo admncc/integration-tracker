@@ -67,7 +67,7 @@ export default function Issues() {
         <div className="ml-auto flex items-center gap-2">
           <input
             className="field w-56"
-            placeholder="Search title, domain…"
+            placeholder="Search title, domain..."
             defaultValue={params.get('q') ?? ''}
             onChange={(event) => setFilter('q', event.target.value)}
           />

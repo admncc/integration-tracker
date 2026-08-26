@@ -188,7 +188,7 @@ export default function Sites() {
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <input
             className="field w-56"
-            placeholder="Search domain, notes…"
+            placeholder="Search domain, notes..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -507,7 +507,7 @@ function ColumnFilter({ column, value, onChange }: { column: Column; value: stri
   return (
     <input
       className="field !py-1 text-xs"
-      placeholder={column.kind === 'number' ? '#' : 'Filter…'}
+      placeholder={column.kind === 'number' ? '#' : 'Filter...'}
       value={value}
       aria-label={`Filter ${column.label}`}
       onChange={(event) => onChange(event.target.value)}
@@ -567,7 +567,7 @@ function AddSiteModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" onClick={onClose}>Cancel</Button>
-          <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Adding…' : 'Add domain'}</Button>
+          <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Adding...' : 'Add domain'}</Button>
         </div>
       </form>
     </Modal>

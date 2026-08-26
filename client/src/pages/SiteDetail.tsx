@@ -507,11 +507,11 @@ function describe(entry: ActivityEntry) {
     case 'import':
       return <>imported sites ({entry.new_value})</>;
     case 'issue_created':
-      return <>raised “{entry.new_value}”</>;
+      return <>raised "{entry.new_value}"</>;
     case 'attachment_added':
       return <>attached {entry.new_value}</>;
     case 'message_posted':
-      return <>wrote in the discussion: “{entry.new_value}”</>;
+      return <>wrote in the discussion: "{entry.new_value}"</>;
     case 'issue_status':
       return (
         <>

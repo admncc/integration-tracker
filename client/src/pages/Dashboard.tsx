@@ -118,7 +118,7 @@ export default function Dashboard() {
 
           {stats.revenue.with_figures === 0 ? (
             <p className="text-sm text-ink-faint">
-              Enter “Previous Session RPM” and “Primis Session RPM” on the Sites page and the comparison appears here.
+              Enter "Previous Session RPM" and "Primis Session RPM" on the Sites page and the comparison appears here.
             </p>
           ) : (
             <>

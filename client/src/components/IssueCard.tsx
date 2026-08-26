@@ -174,7 +174,7 @@ export default function IssueCard({
             </div>
           )}
 
-          {loading && <p className="text-xs text-ink-faint">Loading conversation…</p>}
+          {loading && <p className="text-xs text-ink-faint">Loading conversation...</p>}
 
           {issueAttachments.length > 0 && <Gallery attachments={issueAttachments} onDeleted={reloadDetail} />}
 
@@ -325,7 +325,7 @@ function Thread({
       <form onSubmit={submit} className="space-y-2 rounded-lg border border-line bg-surface p-3">
         <textarea
           className="field min-h-20"
-          placeholder="Add a comment - what you changed, what still fails, what you need…"
+          placeholder="Add a comment - what you changed, what still fails, what you need..."
           value={body}
           onChange={(event) => setBody(event.target.value)}
         />
@@ -340,7 +340,7 @@ function Thread({
           />
           {files.length > 0 && <span className="text-xs text-ink-faint">{files.length} image(s) attached</span>}
           <Button type="submit" size="sm" variant="primary" className="ml-auto" disabled={busy || (!body.trim() && files.length === 0)}>
-            {busy ? 'Posting…' : 'Comment'}
+            {busy ? 'Posting...' : 'Comment'}
           </Button>
         </div>
         {error && <p className="text-xs text-tone-red">{error}</p>}

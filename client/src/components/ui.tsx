@@ -228,7 +228,7 @@ export function Spinner() {
   return (
     <div className="flex items-center justify-center py-16 text-sm text-ink-faint">
       <span className="mr-2 inline-block size-4 animate-spin rounded-full border-2 border-line-strong border-t-brand" />
-      Loading…
+      Loading...
     </div>
   );
 }

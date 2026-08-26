@@ -2,7 +2,7 @@
 
 /*
  * Semantic tokens rather than raw palette classes: utilities compile to
- * `var(--color-…)`, so the dark scheme below is a single override block
+ * `var(--color-...)`, so the dark scheme below is a single override block
  * instead of a `dark:` variant on every element.
  */
 @theme {

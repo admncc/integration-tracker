@@ -41,7 +41,7 @@ export default function Login() {
         {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{error}</p>}
 
         <Button type="submit" variant="primary" className="w-full" disabled={busy}>
-          {busy ? 'Signing in…' : 'Sign in'}
+          {busy ? 'Signing in...' : 'Sign in'}
         </Button>
       </form>
     </div>
