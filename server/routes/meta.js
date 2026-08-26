@@ -257,15 +257,20 @@ metaRouter.get('/export.csv', (_req, res) => {
   res.send(toCsv([header, ...rows]));
 });
 
-/** Upserts by domain: re-importing the sheet updates rows instead of duplicating them. */
+/**
+ * Upserts by domain, writing only the columns the CSV actually carries, so a
+ * two-column revenue sheet updates two columns and leaves the rollout state of
+ * those domains alone.
+ */
 metaRouter.post('/import', requireRole('admin'), (req, res) => {
   const parsed = z.object({ csv: z.string().min(1), dry_run: z.boolean().default(false) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Paste the CSV into the "csv" field' });
 
   let sites;
+  let columns;
   let skipped;
   try {
-    ({ sites, skipped } = csvToSites(parsed.data.csv));
+    ({ sites, columns, skipped } = csvToSites(parsed.data.csv));
   } catch (err) {
     return res.status(400).json({ error: err.message });
   }
@@ -279,39 +284,41 @@ metaRouter.post('/import', requireRole('admin'), (req, res) => {
   const updated = sites.filter((s) => existing.has(s.domain)).map((s) => s.domain);
 
   if (parsed.data.dry_run) {
-    return res.json({ dry_run: true, created, updated, skipped });
+    return res.json({ dry_run: true, columns, created, updated, skipped });
   }
 
-  const columns = Object.keys(sites[0]);
+  // `notes` is not a column on the site any more; it opens the domain's discussion.
+  const writable = columns.filter((c) => c !== 'notes');
+  const insertColumns = ['domain', ...writable];
   const insert = db.prepare(
-    `INSERT INTO sites (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})
-     ON CONFLICT(domain) DO UPDATE SET ${columns
-       .filter((c) => c !== 'domain')
-       .map((c) => `${c} = excluded.${c}`)
-       .join(', ')}, updated_at = datetime('now')`
+    `INSERT INTO sites (${insertColumns.join(',')}) VALUES (${insertColumns.map(() => '?').join(',')})
+     ON CONFLICT(domain) DO UPDATE SET ${
+       writable.length ? `${writable.map((c) => `${c} = excluded.${c}`).join(', ')}, ` : ''
+     }updated_at = datetime('now')`
   );
 
-  for (const site of sites) insert.run(...columns.map((c) => site[c]));
+  for (const site of sites) insert.run(...insertColumns.map((c) => site[c] ?? null));
 
   /*
-   * A Notes column in the sheet becomes the opening message of the domain's
-   * discussion - the tracker has no notes field any more, and dropping the text
-   * silently would lose whatever context the sheet carried.
+   * A Notes column becomes the opening message of the domain's discussion. Only
+   * the sites named in this CSV are touched - an earlier version cleared the
+   * notes column across the whole table on every import.
    */
-  const postNote = db.prepare('INSERT INTO site_messages (site_id, author_id, body) VALUES (?, ?, ?)');
-  const noteExists = db.prepare('SELECT 1 FROM site_messages WHERE site_id = ? AND body = ?');
-  const siteIdFor = db.prepare('SELECT id FROM sites WHERE domain = ?');
   let notesImported = 0;
+  if (columns.includes('notes')) {
+    const postNote = db.prepare('INSERT INTO site_messages (site_id, author_id, body) VALUES (?, ?, ?)');
+    const noteExists = db.prepare('SELECT 1 FROM site_messages WHERE site_id = ? AND body = ?');
+    const siteIdFor = db.prepare('SELECT id FROM sites WHERE domain = ?');
 
-  for (const site of sites) {
-    if (!site.notes) continue;
-    const row = siteIdFor.get(site.domain);
-    if (!row || noteExists.get(row.id, site.notes)) continue;
-    postNote.run(row.id, req.user.id, site.notes);
-    notesImported += 1;
+    for (const site of sites) {
+      if (!site.notes) continue;
+      const row = siteIdFor.get(site.domain);
+      if (!row || noteExists.get(row.id, site.notes)) continue;
+      postNote.run(row.id, req.user.id, site.notes);
+      notesImported += 1;
+    }
   }
-  db.prepare("UPDATE sites SET notes = ''").run();
 
   logActivity({ actorId: req.user.id, kind: 'import', newValue: `${created.length} created, ${updated.length} updated` });
-  res.json({ created, updated, skipped, notes_imported: notesImported });
+  res.json({ columns, created, updated, skipped, notes_imported: notesImported });
 });

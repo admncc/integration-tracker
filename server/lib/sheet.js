@@ -5,6 +5,9 @@
  */
 
 const STATUS_PATTERNS = [
+  // "n/a" first: it is the one label with no number, and the digit patterns
+  // below would otherwise never see it and fall through to pending.
+  [/n\/?a/i, 'na'],
   [/^1|live/i, 'live'],
   [/^2|qa/i, 'qa'],
   [/^3|implem/i, 'tag_impl'],
@@ -125,17 +128,47 @@ const HEADER_ALIASES = {
 };
 
 /**
- * Maps CSV rows onto site records. Returns `{ sites, skipped }` - rows without a
- * usable domain are reported back rather than silently dropped.
+ * Maps CSV rows onto site records.
+ *
+ * Only the columns the CSV actually carries are returned. Filling in defaults
+ * for absent columns and upserting the lot would reset priority, every track
+ * status and the test URL of any domain that appears in a two-column revenue
+ * sheet - a silent wipe of the rollout state.
+ *
+ * Returns `{ sites, columns, skipped }`; `columns` is what the caller may write,
+ * and rows without a usable domain are reported back rather than dropped.
  */
 export function csvToSites(text) {
   const rows = parseCsv(text);
-  if (!rows.length) return { sites: [], skipped: [] };
+  if (!rows.length) return { sites: [], columns: [], skipped: [] };
 
   const header = rows[0].map((cell) => HEADER_ALIASES[cell.trim().toLowerCase()] ?? null);
   if (!header.includes('domain')) {
     throw new Error('CSV needs a "Domain" column');
   }
+
+  const present = new Set(header.filter(Boolean));
+  const parsers = {
+    priority: (v) => Number.parseInt(v, 10) || 99,
+    test_url: (v) => String(v ?? '').trim(),
+    status_video: parseStatus,
+    status_display: parseStatus,
+    status_ads_txt: parseStatus,
+    status_ad_tag: parseStatus,
+    status_mcm: parseStatus,
+    cmp: parseCmp,
+    approval: parseApproval,
+    rpm_previous: parseNumber,
+    rpm_primis: parseNumber,
+    managed_by: (v) => String(v ?? '').trim(),
+    notes: (v) => String(v ?? '').trim(),
+  };
+
+  // A currency column follows its amount, and an amount alone still carries one
+  // in its symbol, so the two travel together.
+  const columns = [...present].filter((field) => field in parsers);
+  if (present.has('rpm_previous')) columns.push('rpm_previous_currency');
+  if (present.has('rpm_primis')) columns.push('rpm_primis_currency');
 
   const sites = [];
   const skipped = [];
@@ -147,29 +180,25 @@ export function csvToSites(text) {
     });
 
     const domain = normaliseDomain(record.domain);
-    if (!domain) { skipped.push(row.join(',')); continue; }
+    if (!domain) {
+      skipped.push(row.join(','));
+      continue;
+    }
 
-    sites.push({
-      domain,
-      priority: Number.parseInt(record.priority, 10) || 99,
-      test_url: String(record.test_url ?? '').trim(),
-      status_video: parseStatus(record.status_video),
-      status_display: parseStatus(record.status_display),
-      status_ads_txt: parseStatus(record.status_ads_txt),
-      status_ad_tag: parseStatus(record.status_ad_tag),
-      status_mcm: parseStatus(record.status_mcm),
-      cmp: parseCmp(record.cmp),
-      approval: parseApproval(record.approval),
-      rpm_previous: parseNumber(record.rpm_previous),
-      rpm_previous_currency: parseCurrency(record.rpm_previous, record.rpm_previous_currency, 'EUR'),
-      rpm_primis: parseNumber(record.rpm_primis),
-      rpm_primis_currency: parseCurrency(record.rpm_primis, record.rpm_primis_currency, 'USD'),
-      managed_by: String(record.managed_by ?? '').trim(),
-      notes: String(record.notes ?? '').trim(),
-    });
+    const site = { domain };
+    for (const field of columns) {
+      if (field === 'rpm_previous_currency') {
+        site[field] = parseCurrency(record.rpm_previous, record.rpm_previous_currency, 'EUR');
+      } else if (field === 'rpm_primis_currency') {
+        site[field] = parseCurrency(record.rpm_primis, record.rpm_primis_currency, 'USD');
+      } else {
+        site[field] = parsers[field](record[field]);
+      }
+    }
+    sites.push(site);
   }
 
-  return { sites, skipped };
+  return { sites, columns, skipped };
 }
 
 /** `https://www.Example.de/path` and `example.de` must not become two rows. */

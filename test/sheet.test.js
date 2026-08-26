@@ -66,7 +66,7 @@ test('toCsv quotes only what needs quoting and round-trips', () => {
 });
 
 test('csvToSites maps a sheet export onto site records', () => {
-  const { sites, skipped } = csvToSites(
+  const { sites, columns, skipped } = csvToSites(
     'PRIO,Domain,STATUS (video),STATUS (display),CMP,Demand partner approval\n' +
       '7,https://www.example.de/article,1 - LIVE,4 - Tags prep,NEW CMP,Approved\n' +
       ',not a domain,,,,'
@@ -74,39 +74,43 @@ test('csvToSites maps a sheet export onto site records', () => {
 
   assert.equal(sites.length, 1);
   assert.equal(skipped.length, 1);
-  assert.deepEqual(
-    { ...sites[0] },
-    {
-      domain: 'example.de',
-      priority: 7,
-      test_url: '',
-      status_video: 'live',
-      status_display: 'tag_prep',
-      status_ads_txt: 'na',
-      status_ad_tag: 'na',
-      status_mcm: 'na',
-      cmp: 'new',
-      approval: 'approved',
-      rpm_previous: null,
-      rpm_previous_currency: 'EUR',
-      rpm_primis: null,
-      rpm_primis_currency: 'USD',
-      managed_by: '',
-      notes: '',
-    }
-  );
+  assert.deepEqual(sites[0], {
+    domain: 'example.de',
+    priority: 7,
+    status_video: 'live',
+    status_display: 'tag_prep',
+    cmp: 'new',
+    approval: 'approved',
+  });
+  assert.deepEqual(columns.sort(), ['approval', 'cmp', 'priority', 'status_display', 'status_video']);
 });
 
-test('csvToSites reads the revenue sheet, currency symbol and all', () => {
-  const { sites } = csvToSites('Domain,PERF\nmaikikii.de,€3.13\nspeedxtc.com/magazin/,$5.80');
+test('csvToSites returns only the columns the CSV carries', () => {
+  // A two-column revenue sheet used to come back with defaults for everything
+  // else, and the importer then wrote those defaults over the rollout state.
+  const { sites, columns } = csvToSites('Domain,PERF\nmaikikii.de,€3.13');
 
-  assert.deepEqual(
-    sites.map((s) => [s.domain, s.rpm_previous, s.rpm_previous_currency]),
-    [
-      ['maikikii.de', 3.13, 'EUR'],
-      ['speedxtc.com', 5.8, 'USD'],
-    ]
-  );
+  assert.deepEqual(columns.sort(), ['rpm_previous', 'rpm_previous_currency']);
+  assert.deepEqual(sites[0], { domain: 'maikikii.de', rpm_previous: 3.13, rpm_previous_currency: 'EUR' });
+  for (const field of ['priority', 'status_video', 'status_display', 'test_url', 'approval', 'cmp']) {
+    assert.equal(field in sites[0], false, `${field} must not be invented`);
+  }
+});
+
+test('an exported n/a status survives a re-import', () => {
+  // The exporter writes the label, and the parser used to fall through to
+  // pending, so every round trip quietly promoted 24 sites.
+  assert.equal(parseStatus('- n/a'), 'na');
+  assert.equal(parseStatus('n/a'), 'na');
+  assert.equal(parseStatus('N/A'), 'na');
+
+  const { sites } = csvToSites('Domain,STATUS (video)\nexample.de,- n/a');
+  assert.equal(sites[0].status_video, 'na');
+});
+
+test('a currency column travels with its amount', () => {
+  const { columns } = csvToSites('Domain,Previous Session RPM,Primis Session RPM\nexample.de,3.13,2.00');
+  assert.deepEqual(columns.sort(), ['rpm_previous', 'rpm_previous_currency', 'rpm_primis', 'rpm_primis_currency'].sort());
 });
 
 test('csvToSites refuses a CSV without a domain column', () => {

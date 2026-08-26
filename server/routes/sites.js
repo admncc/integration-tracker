@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { db, logActivity } from '../lib/db.js';
 import { requireAuth, requireRole } from '../lib/auth.js';
 import { removeUpload } from '../lib/uploads.js';
+import { normaliseDomain } from '../lib/sheet.js';
 import { APPROVAL, CMP, CURRENCIES, OPEN_ISSUE_STATUSES, TRACK_STATUS } from '../../shared/domain.js';
 
 export const sitesRouter = Router();
@@ -12,8 +13,18 @@ const statusEnum = z.enum(Object.keys(TRACK_STATUS));
 const openList = OPEN_ISSUE_STATUSES.map(() => '?').join(',');
 
 const siteFields = {
-  domain: z.string().trim().min(3).max(190),
-  priority: z.coerce.number().int().min(1).max(99),
+  /*
+   * The same normaliser the importer uses. Without it "https://www.Foo.de/bar",
+   * "Foo.de" and "foo.de" became three rows, because the duplicate check is a
+   * case-sensitive equality test.
+   */
+  domain: z
+    .string()
+    .trim()
+    .max(255)
+    .transform((value) => normaliseDomain(value))
+    .refine((value) => value.length > 0, 'That is not a valid domain name'),
+  priority: z.coerce.number({ invalid_type_error: 'Priority must be a number' }).int('Priority must be a whole number').min(1, 'Priority must be between 1 and 99').max(99, 'Priority must be between 1 and 99'),
   test_url: z.string().trim().max(500),
   status_video: statusEnum,
   status_display: statusEnum,
@@ -23,8 +34,8 @@ const siteFields = {
   cmp: z.enum(Object.keys(CMP)),
   approval: z.enum(Object.keys(APPROVAL)),
   // An empty string means "clear it"; z.coerce.number() would turn that into 0.
-  rpm_previous: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number().min(0).nullable()),
-  rpm_primis: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number().min(0).nullable()),
+  rpm_previous: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number({ invalid_type_error: 'An RPM must be a number' }).min(0, 'An RPM cannot be negative').nullable()),
+  rpm_primis: z.preprocess((v) => (v === '' || v == null ? null : v), z.coerce.number({ invalid_type_error: 'An RPM must be a number' }).min(0, 'An RPM cannot be negative').nullable()),
   rpm_previous_currency: z.enum(CURRENCIES),
   rpm_primis_currency: z.enum(CURRENCIES),
   managed_by: z.string().trim().max(190),
@@ -151,7 +162,7 @@ function listMessages(siteId) {
 
 sitesRouter.post('/', requireRole('admin', 'dev'), (req, res) => {
   const parsed = createSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid site data', details: parsed.error.flatten() });
+  if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
 
   const data = parsed.data;
   const exists = db.prepare('SELECT id FROM sites WHERE domain = ?').get(data.domain);
@@ -173,19 +184,25 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
   if (!site) return res.status(404).json({ error: 'Site not found' });
 
   const parsed = updateSchema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid site data', details: parsed.error.flatten() });
+  if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
 
   if (parsed.data.domain && parsed.data.domain !== site.domain) {
     const clash = db.prepare('SELECT id FROM sites WHERE domain = ? AND id != ?').get(parsed.data.domain, id);
     if (clash) return res.status(409).json({ error: `${parsed.data.domain} is already tracked` });
   }
 
-  // The partner owns approval and QA state; everything else belongs to the publisher.
+  // The partner owns approval and its own RPM figure; the rest is the publisher's.
   const partnerWritable = new Set(['approval', 'rpm_primis', 'rpm_primis_currency', 'notes']);
-  const updates = Object.entries(parsed.data).filter(([field, value]) => {
-    if (req.user.role === 'partner' && !partnerWritable.has(field)) return false;
-    return normalise(value) !== site[field];
-  });
+  if (req.user.role === 'partner') {
+    const forbidden = Object.keys(parsed.data).filter((field) => !partnerWritable.has(field));
+    if (forbidden.length) {
+      // Dropping these quietly and answering 200 told an API caller a write had
+      // happened when it had not.
+      return res.status(403).json({ error: `The partner side cannot change: ${forbidden.join(', ')}` });
+    }
+  }
+
+  const updates = Object.entries(parsed.data).filter(([field, value]) => normalise(value) !== site[field]);
   if (!updates.length) return res.json({ site });
 
   db.prepare(
@@ -214,6 +231,14 @@ sitesRouter.delete('/:id', requireRole('admin'), (req, res) => {
 
   res.json({ ok: true, removed_images: keys.length });
 });
+
+/** Zod's first concrete complaint beats a generic "Invalid site data". */
+function firstMessage(error) {
+  const issue = error.issues?.[0];
+  if (!issue) return 'Invalid site data';
+  const field = issue.path?.join('.');
+  return field && !issue.message.toLowerCase().includes(field.replace('_', ' ')) ? `${field}: ${issue.message}` : issue.message;
+}
 
 /** SQLite has no boolean type and rejects `undefined`. */
 function normalise(value) {

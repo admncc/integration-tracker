@@ -103,15 +103,23 @@ export function InlineText({
   onCommit: (next: string) => void;
   disabled?: boolean;
   placeholder?: string;
-  type?: 'text' | 'number' | 'url';
+  /**
+   * `decimal` is a text input, not a number input. Chromium silently drops the
+   * comma from a number field, so a German "3,14" arrived as "314" - a
+   * hundredfold error in a revenue figure, with nothing shown to the user.
+   */
+  type?: 'text' | 'number' | 'url' | 'decimal';
   className?: string;
 }) {
   if (disabled) {
     return <span className={`text-sm ${value ? '' : 'text-ink-faint'} ${className}`}>{value || placeholder}</span>;
   }
+  const decimal = type === 'decimal';
+
   return (
     <input
-      type={type}
+      type={decimal ? 'text' : type}
+      inputMode={decimal ? 'decimal' : undefined}
       defaultValue={value}
       key={value}
       placeholder={placeholder}

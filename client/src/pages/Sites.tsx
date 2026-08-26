@@ -22,9 +22,21 @@ type Column = {
   kind: 'number' | 'money' | 'uplift' | 'text' | 'enum' | 'issues';
   options?: { value: string; label: string; short?: string }[];
   tones?: Record<string, Tone>;
-  /** A CSS percentage; all of them together make 100. */
-  width: string;
+  /** Relative share of the table width; the percentages are computed from these. */
+  weight: number;
+  /** Dropped on a narrow screen, where twelve columns cannot all stay readable. */
+  secondary?: boolean;
 };
+
+/** The checkbox column has no descriptor but still needs a share. */
+const SELECT_COLUMN_WEIGHT = 2.5;
+
+/**
+ * 1280 is the widest viewport where all thirteen columns still render their
+ * labels in full; below it the revenue columns are hidden rather than squeezed
+ * until "New" and "None" both read "N...".
+ */
+const NARROW_VIEWPORT = 1280;
 
 const tonesOf = (map: Record<string, { tone: string }>) =>
   Object.fromEntries(Object.entries(map).map(([k, v]) => [k, v.tone as Tone]));
@@ -36,22 +48,22 @@ const tonesOf = (map: Record<string, { tone: string }>) =>
  * on the site's detail page instead.
  */
 const COLUMNS: Column[] = [
-  { key: 'priority', label: 'Prio', kind: 'number', width: '3.5%' },
-  { key: 'domain', label: 'Domain', kind: 'text', width: '17%' },
+  { key: 'priority', label: 'Prio', kind: 'number', weight: 3.5 },
+  { key: 'domain', label: 'Domain', kind: 'text', weight: 16 },
   ...TRACKS.map((track) => ({
     key: track.key,
     label: track.label,
     kind: 'enum' as const,
     options: STATUS_OPTIONS,
     tones: tonesOf(TRACK_STATUS),
-    width: '8.1%',
+    weight: 8.1,
   })),
-  { key: 'cmp', label: 'CMP', kind: 'enum', options: CMP_OPTIONS, tones: tonesOf(CMP), width: '5.5%' },
-  { key: 'approval', label: 'Approval', kind: 'enum', options: APPROVAL_OPTIONS, tones: tonesOf(APPROVAL), width: '8%' },
-  { key: 'open_issues', label: 'Issues', kind: 'issues', width: '6%' },
-  { key: 'rpm_previous', label: 'Prev. RPM', kind: 'money', width: '6.5%' },
-  { key: 'rpm_primis', label: 'Primis RPM', kind: 'money', width: '6.5%' },
-  { key: 'rpm_uplift', label: 'Δ', kind: 'uplift', width: '4%' },
+  { key: 'cmp', label: 'CMP', kind: 'enum', options: CMP_OPTIONS, tones: tonesOf(CMP), weight: 5.5 },
+  { key: 'approval', label: 'Approval', kind: 'enum', options: APPROVAL_OPTIONS, tones: tonesOf(APPROVAL), weight: 8 },
+  { key: 'open_issues', label: 'Issues', kind: 'issues', weight: 6 },
+  { key: 'rpm_previous', label: 'Prev. RPM', kind: 'money', weight: 6.5, secondary: true },
+  { key: 'rpm_primis', label: 'Primis RPM', kind: 'money', weight: 6.5, secondary: true },
+  { key: 'rpm_uplift', label: 'Δ', kind: 'uplift', weight: 5, secondary: true },
 ];
 
 /** Fields the partner may change; everything else is publisher-owned. */
@@ -71,6 +83,21 @@ export default function Sites() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+
+  // Hiding the revenue columns beats rendering "N..." where "New" and "None"
+  // become indistinguishable; the figures are still on each domain's page.
+  const [narrow, setNarrow] = useState(() => window.innerWidth < NARROW_VIEWPORT);
+  useEffect(() => {
+    const onResize = () => setNarrow(window.innerWidth < NARROW_VIEWPORT);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  const columns = useMemo(() => COLUMNS.filter((column) => !(narrow && column.secondary)), [narrow]);
+  const widthOf = useMemo(() => {
+    const total = SELECT_COLUMN_WEIGHT + columns.reduce((sum, column) => sum + column.weight, 0);
+    return (weight: number) => `${((weight / total) * 100).toFixed(3)}%`;
+  }, [columns]);
 
   const readOnly = (field: string) => (user?.role === 'partner' ? !PARTNER_WRITABLE.has(field) : !can('edit_site'));
 
@@ -134,7 +161,21 @@ export default function Sites() {
       });
     });
 
+    // Status columns sort in their declared order, not alphabetically on the
+    // internal key, so Video reads 1 Live -> 2 QA -> ... -> n/a as in the sheet.
+    const ORDERED = {
+      ...Object.fromEntries(TRACKS.map(({ key }) => [key, Object.keys(TRACK_STATUS)])),
+      cmp: Object.keys(CMP),
+      approval: Object.keys(APPROVAL),
+    } as Record<string, string[]>;
+
     return rows.sort((a, b) => {
+      const order = ORDERED[sort.key];
+      if (order) {
+        const left = order.indexOf(String(a[sort.key as keyof Site]));
+        const right = order.indexOf(String(b[sort.key as keyof Site]));
+        return (left - right) * sort.dir;
+      }
       if (sort.key === 'rpm_uplift') {
         const left = rpmUplift(a, eurUsd);
         const right = rpmUplift(b, eurUsd);
@@ -192,6 +233,11 @@ export default function Sites() {
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+          {narrow && (
+            <span className="text-xs text-ink-faint" title="Open a domain to see and edit its RPM figures">
+              RPM columns hidden on this width
+            </span>
+          )}
           {activeFilters > 0 && (
             <Button size="sm" onClick={() => { setFilters({}); setSearch(''); setReadiness('all'); }}>
               Clear filters ({activeFilters})
@@ -254,7 +300,7 @@ export default function Sites() {
         <table className="w-full table-fixed border-collapse text-sm">
           <thead>
             <tr className="border-b border-line bg-raised">
-              <th className="bg-raised px-2 py-2" style={{ width: '2.5%' }}>
+              <th className="bg-raised px-2 py-2" style={{ width: widthOf(SELECT_COLUMN_WEIGHT) }}>
                 <input
                   type="checkbox"
                   aria-label="Select all visible sites"
@@ -262,8 +308,8 @@ export default function Sites() {
                   onChange={(event) => setSelected(event.target.checked ? new Set(visible.map((s) => s.id)) : new Set())}
                 />
               </th>
-              {COLUMNS.map((column) => (
-                <th key={column.key} className="overflow-hidden px-2 py-2 text-left font-medium text-ink-soft" style={{ width: column.width }}>
+              {columns.map((column) => (
+                <th key={column.key} className="overflow-hidden px-2 py-2 text-left font-medium text-ink-soft" style={{ width: widthOf(column.weight) }}>
                   <button onClick={() => toggleSort(column.key)} className="inline-flex items-center gap-1 hover:text-ink">
                     {column.label}
                     <span className={sort.key === column.key ? 'opacity-100' : 'opacity-0'}>{sort.dir === 1 ? '↑' : '↓'}</span>
@@ -274,7 +320,7 @@ export default function Sites() {
 
             <tr className="border-b border-line bg-surface">
               <th className="bg-surface" />
-              {COLUMNS.map((column) => (
+              {columns.map((column) => (
                 <th key={column.key} className="overflow-hidden px-1.5 py-1.5">
                   <ColumnFilter
                     column={column}
@@ -292,13 +338,15 @@ export default function Sites() {
                 key={site.id}
                 className={`border-b border-line last:border-0 hover:bg-raised/60 ${
                   (site.open_issues ?? 0) > 0 ? 'bg-tone-red-bg/25' : ''
-                } ${siteReadiness(site) === 'inactive' ? 'opacity-55' : ''}`}
+                } ${siteReadiness(site) === 'inactive' ? 'opacity-55' : ''} ${
+                  site.archived ? 'bg-tone-slate-bg/40 italic' : ''
+                }`}
               >
                 <td className="px-2 py-1.5">
                   <input type="checkbox" aria-label={`Select ${site.domain}`} checked={selected.has(site.id)} onChange={() => toggleRow(site.id)} />
                 </td>
 
-                {COLUMNS.map((column) => (
+                {columns.map((column) => (
                   <td
                     key={column.key}
                     className="overflow-hidden px-2 py-1.5 align-middle"
@@ -341,7 +389,7 @@ export default function Sites() {
             setNotice({ tone: 'green', text: `Issue raised on ${count} site(s)` });
             setBulkOpen(false);
             setSelected(new Set());
-            api.get<{ sites: Site[] }>('/sites').then((r) => setSites(r.sites));
+            api.get<{ sites: Site[] }>(`/sites${showArchived ? '?archived=1' : ''}`).then((r) => setSites(r.sites));
           }}
         />
       )}
@@ -406,7 +454,7 @@ function Cell({
           value={value == null ? '' : String(value)}
           disabled={false}
           onCommit={(next) => onCommit(column.key, next)}
-          type="number"
+          type="decimal"
           placeholder="-"
           className="min-w-0 flex-1 !px-1 text-xs tabular-nums"
         />
@@ -451,6 +499,11 @@ function Cell({
         title={title}
       >
         <span aria-hidden className={`size-2 shrink-0 rounded-full ${READINESS[readiness].dot}`} />
+        {Boolean(site.archived) && (
+          <span className="shrink-0 rounded bg-tone-slate-bg px-1 text-[10px] font-medium text-tone-slate not-italic">
+            archived
+          </span>
+        )}
         <span className="sr-only">{READINESS[readiness].label}. </span>
         <span className="truncate group-hover:underline">{site.domain}</span>
       </Link>

@@ -475,7 +475,7 @@ function MoneyField({
       <span className="text-xs text-ink-faint">{label}</span>
       <div className="mt-0.5 flex items-center gap-1.5">
         <div className="min-w-0 flex-1">
-          <InlineText value={amount == null ? '' : String(amount)} type="number" disabled={disabled} onCommit={onAmount} />
+          <InlineText value={amount == null ? '' : String(amount)} type="decimal" disabled={disabled} onCommit={onAmount} />
         </div>
         <div className="shrink-0">
           <InlineSelect
