@@ -10,7 +10,7 @@ export const TRACK_STATUS = {
   tag_impl: { label: '3 - Tag implementation',  short: '3 Impl.',   tone: 'amber'  },
   tag_prep: { label: '4 - Tags prep',           short: '4 Prep',    tone: 'purple' },
   pending:  { label: '5 - Pending',             short: '5 Pending', tone: 'slate'  },
-  na:       { label: 'n/a',                     short: 'n/a',       tone: 'muted'  },
+  na:       { label: '- n/a',                   short: 'n/a',       tone: 'muted'  },
 };
 
 /** The five integration tracks every site moves through, in reporting order. */
