@@ -1,0 +1,131 @@
+# Integration Tracker
+
+A shared workspace for rolling sites out with a demand partner. It replaces the
+Google Sheet plus e-mail thread: every domain has a status per integration
+track, the partner raises QA issues against a specific domain, developers work
+them off, and the partner ticks them off after a re-check.
+
+Built for the Primis rollout, but nothing in it is Primis-specific.
+
+## What it does
+
+**Sites** — one row per domain, with the five tracks from the old sheet (video,
+display, ads.txt, ad tag, MCM) plus CMP, partner approval and notes. Every cell
+is editable in place, every column filterable and sortable. Domains can be
+added, archived or deleted. A domain with open issues is marked in the list;
+clicking it opens its detail page, where the test URL sits at the top — it is
+the first thing either side reaches for.
+
+**Issues** — raised against a domain, with a type (*technical* or *revenue*), a
+category, a severity, an assignee and a due date. Screenshots can be attached to
+the issue and to any comment. Comments carry the author and a full timestamp.
+
+The QA loop is the status flow:
+
+```
+open → in progress → ready for re-check → verified
+         (developer)      (developer)      (partner)
+```
+
+A partner can reopen a verified issue; the card then shows which QA round the
+issue is on, so an item that keeps bouncing back is visible rather than buried
+in a mail thread.
+
+**One finding, many domains** — the case the mail thread kept getting wrong
+("the player is in `<head>` on these 13 sites") becomes one write: select the
+domains in the list, raise one issue, and each domain gets its own tickable item
+grouped under a shared batch.
+
+**Revenue** — two hand-entered figures per site, *Previous Session RPM* and
+*Primis Session RPM*, each in its own currency because the two providers report
+differently. Everything comparable is normalised to EUR through the European
+Central Bank's daily reference rate, pulled automatically on start-up and every
+twelve hours. The dashboard shows where Primis beats the previous setup and
+where it does not — visible to the partner as well as to you.
+
+**Import / export** — paste a CSV export of the old sheet and it upserts by
+domain; the sheet's own wording ("1 - LIVE", "4 - Tags prep", "€3.13", "$2.00")
+is understood. Sites and issues both export back to CSV.
+
+## Roles
+
+| Role | Can |
+| --- | --- |
+| **Admin** | everything, plus users and the exchange rate |
+| **Developer** | edit sites, work issues, hand them back for re-check |
+| **Demand partner** | raise and verify issues, set approval and the Primis RPM |
+
+The partner cannot edit track statuses or the previous-setup RPM, and a
+developer cannot verify their own fix. Both rules are enforced server-side, not
+just hidden in the interface.
+
+## Running it
+
+Requires Node 22.5 or newer (the built-in `node:sqlite` module). No database
+server, no native build step.
+
+```bash
+npm install
+npm run seed        # current sites, RPM figures and the open QA findings
+npm run dev         # API on :4000, UI on :5173
+```
+
+Sign in with `admin` / `changeme123`. The seed also creates `dev`, `dev-extern`
+and `primis-qa` with the same password — **change them before the partner gets a
+link.**
+
+For production:
+
+```bash
+npm run build       # bundles the UI into dist/
+npm start           # one process serves the API and the UI on :4000
+```
+
+Put it behind a TLS-terminating reverse proxy and set `TRUST_PROXY=1` so client
+IPs and secure cookies are correct.
+
+### Environment
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PORT` | `4000` | HTTP port |
+| `DATABASE_PATH` | `data/tracker.db` | SQLite file |
+| `UPLOAD_DIR` | `data/uploads` | where screenshots are stored |
+| `TRUST_PROXY` | unset | set to `1` behind a reverse proxy |
+| `DISABLE_FX_REFRESH` | unset | set to `1` to never call the ECB |
+| `INSECURE_COOKIES` | unset | set to `1` only to run production over plain HTTP |
+| `SEED_PASSWORD` | `changeme123` | password the seed gives its accounts |
+
+Everything worth keeping lives under `data/` — back up that directory and you
+have the whole tracker.
+
+## Layout
+
+```
+server/          Express API, plain ESM, no build step
+  lib/db.js      schema, migrations, activity log
+  lib/auth.js    scrypt passwords, cookie sessions, role guards
+  lib/sheet.js   CSV parsing and the Google Sheet vocabulary
+  lib/fx.js      ECB daily reference rate
+  lib/uploads.js screenshot storage
+  routes/        auth, sites, issues, meta (stats, users, import/export)
+shared/domain.js statuses, categories, currency helpers — used by both sides
+client/          React + Vite + Tailwind
+scripts/seed.js  current rollout state
+test/            node:test suites for the pure logic
+```
+
+`npm test` runs the unit tests. They cover the sheet parsing and the currency
+maths — the two places where a silent mistake would corrupt real numbers.
+
+## Not built yet
+
+- **Notifications.** Nothing is pushed anywhere; people see new issues when they
+  open the tool. An e-mail or Slack digest of "opened / handed back / verified
+  today" would be the natural next step, and needs SMTP or a webhook URL.
+- **Automated checks.** The tracker records what QA found; it does not fetch a
+  test URL to verify a tag position itself. Worth adding once the manual loop
+  settles, since the recurring findings (player in `<head>`, duplicate slot IDs,
+  leftover units) are all machine-checkable.
+- **Revenue import.** RPM figures are typed in by hand. If the reporting side
+  offers an API, that column could fill itself.

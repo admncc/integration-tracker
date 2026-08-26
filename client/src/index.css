@@ -1,0 +1,101 @@
+@import 'tailwindcss';
+
+/*
+ * Semantic tokens rather than raw palette classes: utilities compile to
+ * `var(--color-…)`, so the dark scheme below is a single override block
+ * instead of a `dark:` variant on every element.
+ */
+@theme {
+  --color-canvas: #f6f7f9;
+  --color-surface: #ffffff;
+  --color-raised: #f9fafb;
+  --color-line: #e4e7ec;
+  --color-line-strong: #d0d5dd;
+  --color-ink: #101828;
+  --color-ink-soft: #475467;
+  --color-ink-faint: #98a2b3;
+  --color-brand: #4f46e5;
+  --color-brand-soft: #eef2ff;
+  --color-brand-ink: #3730a3;
+
+  --color-tone-green: #067647;
+  --color-tone-green-bg: #ecfdf3;
+  --color-tone-blue: #175cd3;
+  --color-tone-blue-bg: #eff8ff;
+  --color-tone-amber: #b54708;
+  --color-tone-amber-bg: #fffaeb;
+  --color-tone-red: #b42318;
+  --color-tone-red-bg: #fef3f2;
+  --color-tone-purple: #6941c6;
+  --color-tone-purple-bg: #f4f3ff;
+  --color-tone-slate: #475467;
+  --color-tone-slate-bg: #f2f4f7;
+  --color-tone-muted: #98a2b3;
+  --color-tone-muted-bg: #f9fafb;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-canvas: #0b0d12;
+    --color-surface: #14171f;
+    --color-raised: #1a1e28;
+    --color-line: #242936;
+    --color-line-strong: #333a4a;
+    --color-ink: #e7eaf0;
+    --color-ink-soft: #98a2b3;
+    --color-ink-faint: #667085;
+    --color-brand: #8b85f8;
+    --color-brand-soft: #1e1b41;
+    --color-brand-ink: #c7d2fe;
+
+    --color-tone-green: #75e0a7;
+    --color-tone-green-bg: #0a2c1d;
+    --color-tone-blue: #84caff;
+    --color-tone-blue-bg: #0c2440;
+    --color-tone-amber: #fdb022;
+    --color-tone-amber-bg: #341c05;
+    --color-tone-red: #fda29b;
+    --color-tone-red-bg: #3a1512;
+    --color-tone-purple: #bdb4fe;
+    --color-tone-purple-bg: #221a45;
+    --color-tone-slate: #cdd3de;
+    --color-tone-slate-bg: #222735;
+    --color-tone-muted: #7d8697;
+    --color-tone-muted-bg: #1a1e28;
+  }
+}
+
+html, body, #root { height: 100%; }
+
+body {
+  background: var(--color-canvas);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Form controls inherit the theme instead of the browser's default chrome. */
+input, select, textarea, button { font: inherit; color: inherit; }
+
+@utility field {
+  width: 100%;
+  border-radius: 0.5rem;
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-surface);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.875rem;
+  outline: none;
+}
+.field:focus { border-color: var(--color-brand); box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 18%, transparent); }
+
+@utility card {
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--color-line-strong); border-radius: 999px; }
+::-webkit-scrollbar-track { background: transparent; }
