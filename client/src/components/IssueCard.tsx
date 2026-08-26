@@ -130,7 +130,7 @@ export default function IssueCard({
               </Link>
             )}
             {issue.batch_id && (
-              <Link to={`/issues?batch=${issue.batch_id}`} className="text-xs text-ink-faint hover:text-brand" title="Same finding across several domains">
+              <Link to={`/issues?status=all&batch_id=${issue.batch_id}`} className="text-xs text-ink-faint hover:text-brand" title="Same finding across several domains">
                 ⧉ batch
               </Link>
             )}
@@ -298,7 +298,7 @@ function Gallery({ attachments, onDeleted }: { attachments: Attachment[]; onDele
                 className="size-24 rounded-lg border border-line object-cover transition group-hover:brightness-95"
               />
             </button>
-            {(user?.role === 'admin' || user?.name === attachment.uploader_name) && (
+            {(user?.role === 'admin' || user?.id === attachment.uploader_id) && (
               <button
                 onClick={async () => {
                   await api.del(`/issues/attachments/${attachment.id}`);

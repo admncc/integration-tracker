@@ -11,11 +11,16 @@ const FILTERS = [
   {
     key: 'status',
     label: 'Status',
+    // "all" is a real value rather than the empty option: an absent parameter
+    // means "the default view", which is open issues.
     options: [
       ['open', 'All open'],
       ...Object.entries(ISSUE_STATUS).map(([v, m]) => [v, m.label] as [string, string]),
       ['deleted', 'Deleted'],
+      ['all', 'Everything'],
     ],
+    noBlank: true,
+    fallback: 'open',
   },
   { key: 'type', label: 'Type', options: Object.entries(ISSUE_TYPE).map(([v, m]) => [v, m.label] as [string, string]) },
   { key: 'severity', label: 'Severity', options: Object.entries(SEVERITY).map(([v, m]) => [v, m.label] as [string, string]) },
@@ -76,7 +81,7 @@ export default function Issues() {
           <input
             className="field w-56"
             placeholder="Search title, domain..."
-            defaultValue={params.get('q') ?? ''}
+            value={params.get('q') ?? ''}
             onChange={(event) => setFilter('q', event.target.value)}
           />
           <a
@@ -95,8 +100,12 @@ export default function Issues() {
         {FILTERS.map((filter) => (
           <label key={filter.key} className="text-xs">
             <span className="mb-1 block text-ink-faint">{filter.label}</span>
-            <select className="field !w-auto !py-1" value={params.get(filter.key) ?? ''} onChange={(event) => setFilter(filter.key, event.target.value)}>
-              <option value="">{filter.key === 'status' ? 'Everything' : 'All'}</option>
+            <select
+              className="field !w-auto !py-1"
+              value={params.get(filter.key) ?? ('fallback' in filter ? filter.fallback : '')}
+              onChange={(event) => setFilter(filter.key, event.target.value)}
+            >
+              {!('noBlank' in filter) && <option value="">All</option>}
               {filter.options.map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
               ))}
@@ -145,7 +154,17 @@ export default function Issues() {
               issue={issue}
               users={users}
               showDomain
-              onChanged={(updated) => setIssues((current) => current.map((i) => (i.id === updated.id ? { ...i, ...updated } : i)))}
+              onChanged={(updated) =>
+                setIssues((current) => {
+                  // A card that no longer matches the active view leaves the list
+                  // instead of sitting there contradicting the header count.
+                  const viewingDeleted = params.get('status') === 'deleted';
+                  if (Boolean(updated.deleted_at) !== viewingDeleted && params.get('status') !== 'all') {
+                    return current.filter((i) => i.id !== updated.id);
+                  }
+                  return current.map((i) => (i.id === updated.id ? { ...i, ...updated } : i));
+                })
+              }
             />
           ))}
         </div>

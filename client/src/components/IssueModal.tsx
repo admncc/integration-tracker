@@ -142,6 +142,7 @@ export default function IssueModal({
             className="field"
             required
             minLength={3}
+            maxLength={300}
             placeholder="Video player embedded in <head> instead of <body>"
             value={form.title}
             onChange={(e) => setForm({ ...form, title: e.target.value })}

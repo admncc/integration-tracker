@@ -137,6 +137,7 @@ export interface Attachment {
   id: number;
   issue_id: number;
   comment_id: number | null;
+  uploader_id: number | null;
   filename: string;
   mime: string;
   size: number;

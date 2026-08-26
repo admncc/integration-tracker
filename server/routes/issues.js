@@ -25,14 +25,31 @@ const ALLOWED_TRANSITIONS = {
   partner: ['open', 'verified', 'wont_fix'],
 };
 
+/** A non-existent assignee used to reach SQLite and fail as a 500. */
+function assigneeError(assigneeId) {
+  if (assigneeId == null) return null;
+  const user = db.prepare('SELECT id, active FROM users WHERE id = ?').get(assigneeId);
+  if (!user) return 'That assignee does not exist';
+  if (!user.active) return 'That assignee is disabled';
+  return null;
+}
+
 const baseIssue = {
-  title: z.string().trim().min(3).max(300),
+  title: z.string().trim().min(3, 'A title needs at least 3 characters').max(300, 'A title can be at most 300 characters'),
   description: z.string().trim().max(20000).default(''),
   type: typeEnum.default('technical'),
   category: categoryEnum.default('other'),
   severity: severityEnum.default('medium'),
   assignee_id: z.coerce.number().int().positive().nullable().optional(),
-  due_date: z.string().trim().max(10).nullable().optional(),
+  // A free-text due date rendered as "Due not-a-date" and broke the overdue compare.
+  due_date: z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'A due date must look like 2026-08-31')
+    .refine((value) => !Number.isNaN(Date.parse(value)), 'That is not a real date')
+    .nullable()
+    .optional()
+    .or(z.literal('').transform(() => null)),
 };
 
 issuesRouter.get('/', (req, res) => {
@@ -44,7 +61,10 @@ issuesRouter.get('/', (req, res) => {
     where.push('i.deleted_at IS NOT NULL');
   } else {
     where.push('i.deleted_at IS NULL');
-    if (req.query.status === 'open') {
+    // `all` is the explicit "no status filter"; an absent param is not the same thing.
+    if (req.query.status === 'all') {
+      // nothing further to add
+    } else if (req.query.status === 'open') {
       where.push(`i.status IN (${OPEN_ISSUE_STATUSES.map(() => '?').join(',')})`);
       params.push(...OPEN_ISSUE_STATUSES);
     } else if (req.query.status) {
@@ -59,8 +79,9 @@ issuesRouter.get('/', (req, res) => {
     }
   }
   if (req.query.q) {
-    where.push('(i.title LIKE ? OR i.description LIKE ? OR s.domain LIKE ?)');
-    const like = `%${req.query.q}%`;
+    // Without escaping, a search for "%" or "_" matched every row.
+    where.push(`(i.title LIKE ? ESCAPE '\\' OR i.description LIKE ? ESCAPE '\\' OR s.domain LIKE ? ESCAPE '\\')`);
+    const like = `%${String(req.query.q).replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
     params.push(like, like, like);
   }
 
@@ -167,7 +188,7 @@ issuesRouter.get('/:id', (req, res) => {
 
   const attachments = db
     .prepare(
-      `SELECT a.id, a.issue_id, a.comment_id, a.filename, a.mime, a.size, a.created_at, u.name AS uploader_name
+      `SELECT a.id, a.issue_id, a.comment_id, a.uploader_id, a.filename, a.mime, a.size, a.created_at, u.name AS uploader_name
          FROM attachments a LEFT JOIN users u ON u.id = a.uploader_id
         WHERE a.issue_id = ? ORDER BY a.id ASC`
     )
@@ -178,10 +199,13 @@ issuesRouter.get('/:id', (req, res) => {
 
 issuesRouter.post('/', (req, res) => {
   const parsed = z.object({ site_id: z.coerce.number().int().positive(), ...baseIssue }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid issue data', details: parsed.error.flatten() });
+  if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
 
   const site = db.prepare('SELECT id, domain FROM sites WHERE id = ?').get(parsed.data.site_id);
   if (!site) return res.status(404).json({ error: 'Site not found' });
+
+  const badAssignee = assigneeError(parsed.data.assignee_id);
+  if (badAssignee) return res.status(400).json({ error: badAssignee });
 
   const issue = insertIssue({ ...parsed.data, reporter_id: req.user.id, batch_id: null }, req.user.id, site.domain);
   res.status(201).json({ issue });
@@ -196,9 +220,13 @@ issuesRouter.post('/bulk', (req, res) => {
   const parsed = z
     .object({ site_ids: z.array(z.coerce.number().int().positive()).min(1).max(500), ...baseIssue })
     .safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid issue data', details: parsed.error.flatten() });
+  if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
 
   const { site_ids, ...fields } = parsed.data;
+
+  const badAssignee = assigneeError(fields.assignee_id);
+  if (badAssignee) return res.status(400).json({ error: badAssignee });
+
   const uniqueIds = [...new Set(site_ids)];
   const sites = db
     .prepare(`SELECT id, domain FROM sites WHERE id IN (${uniqueIds.map(() => '?').join(',')})`)
@@ -227,9 +255,15 @@ issuesRouter.patch('/:id', (req, res) => {
     .object({ ...baseIssue, status: statusEnum })
     .partial()
     .safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid issue data', details: parsed.error.flatten() });
+  if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
 
   const data = parsed.data;
+
+  if (data.assignee_id !== undefined) {
+    const badAssignee = assigneeError(data.assignee_id);
+    if (badAssignee) return res.status(400).json({ error: badAssignee });
+  }
+
   if (data.status && data.status !== issue.status && !ALLOWED_TRANSITIONS[req.user.role].includes(data.status)) {
     return res.status(403).json({ error: `A ${req.user.role} cannot set an issue to "${ISSUE_STATUS[data.status].label}"` });
   }
@@ -338,7 +372,7 @@ issuesRouter.post(
 
     res.status(201).json({
       attachment: db
-        .prepare(`SELECT a.id, a.issue_id, a.comment_id, a.filename, a.mime, a.size, a.created_at, u.name AS uploader_name
+        .prepare(`SELECT a.id, a.issue_id, a.comment_id, a.uploader_id, a.filename, a.mime, a.size, a.created_at, u.name AS uploader_name
                     FROM attachments a LEFT JOIN users u ON u.id = a.uploader_id WHERE a.id = ?`)
         .get(attachmentId),
     });
@@ -407,6 +441,14 @@ issuesRouter.post('/:id/restore', (req, res) => {
 
   res.json({ ok: true, issue: db.prepare('SELECT * FROM issues WHERE id = ?').get(id) });
 });
+
+/** Zod's first concrete complaint beats a generic "Invalid issue data". */
+function firstMessage(error) {
+  const issue = error.issues?.[0];
+  if (!issue) return 'Invalid issue data';
+  const field = issue.path?.join('.');
+  return field && !issue.message.toLowerCase().includes(field) ? `${field}: ${issue.message}` : issue.message;
+}
 
 function insertIssue(fields, actorId, domain) {
   const columns = ['site_id', 'batch_id', 'title', 'description', 'type', 'category', 'severity', 'reporter_id', 'assignee_id', 'due_date'];

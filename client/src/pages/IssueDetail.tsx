@@ -12,6 +12,24 @@ type Payload = {
   siblings: { id: number; status: keyof typeof ISSUE_STATUS; domain: string }[];
 };
 
+/** Same wording as the site history, so an event reads alike wherever it shows. */
+function describe(entry: ActivityEntry) {
+  switch (entry.kind) {
+    case 'issue_created':
+      return 'raised this issue';
+    case 'issue_deleted':
+      return `deleted this issue`;
+    case 'issue_restored':
+      return `restored this issue`;
+    case 'attachment_added':
+      return `attached ${entry.new_value}`;
+    case 'issue_status':
+      return `changed status to ${ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value}`;
+    default:
+      return entry.field ? `changed ${entry.field}` : 'made a change';
+  }
+}
+
 export default function IssueDetail() {
   const { id } = useParams();
   const [data, setData] = useState<Payload | null>(null);
@@ -69,13 +87,7 @@ export default function IssueDetail() {
               <li key={entry.id} className="border-l border-line pl-3 text-xs">
                 <div className="text-ink-soft">
                   <span className="font-medium text-ink">{entry.actor_name ?? 'System'}</span>{' '}
-                  {entry.kind === 'issue_created'
-                    ? 'raised this issue'
-                    : entry.kind === 'attachment_added'
-                      ? `attached ${entry.new_value}`
-                      : entry.field === 'status'
-                        ? `changed status to ${ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value}`
-                        : `changed ${entry.field}`}
+                  {describe(entry)}
                 </div>
                 <Timestamp iso={entry.created_at} className="text-ink-faint" />
               </li>
