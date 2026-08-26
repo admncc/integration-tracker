@@ -26,6 +26,15 @@ function primaryAction(status: IssueStatus, role: string): { next: IssueStatus; 
   return null;
 }
 
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden className="size-4" fill="none" stroke="currentColor" strokeWidth="1.4">
+      <path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9L12 4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6.8 6.8v4.4M9.2 6.8v4.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 export default function IssueCard({
   issue: initial,
   users,
@@ -178,6 +187,18 @@ export default function IssueCard({
                 Restore
               </Button>
             )
+          ) : confirmDelete ? (
+            /* The confirmation replaces the controls, so there is nothing to
+               mis-click while it is up. */
+            <>
+              <span className="text-xs text-ink-soft">Delete? It stays in the history and can be restored.</span>
+              <Button size="sm" variant="danger" onClick={remove}>
+                Yes, delete
+              </Button>
+              <Button size="sm" onClick={() => setConfirmDelete(false)}>
+                Cancel
+              </Button>
+            </>
           ) : (
             <>
               <InlineSelect
@@ -191,6 +212,16 @@ export default function IssueCard({
                 <Button size="sm" variant="primary" onClick={() => update({ status: action.next })}>
                   {action.label}
                 </Button>
+              )}
+              {canDelete && (
+                <button
+                  onClick={() => setConfirmDelete(true)}
+                  title="Delete this issue"
+                  aria-label={`Delete issue ${issue.id}`}
+                  className="rounded-lg px-2 py-1.5 text-ink-faint transition hover:bg-tone-red-bg hover:text-tone-red"
+                >
+                  <TrashIcon />
+                </button>
               )}
             </>
           )}
@@ -227,28 +258,6 @@ export default function IssueCard({
           )}
 
           {loading && <p className="text-xs text-ink-faint">Loading conversation...</p>}
-
-          {canDelete && !deleted && (
-            <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3 text-xs">
-              {confirmDelete ? (
-                <>
-                  <span className="text-ink-soft">
-                    Delete this issue? It stays in the site history and under the Deleted filter, and can be restored.
-                  </span>
-                  <Button size="sm" variant="danger" onClick={remove}>
-                    Yes, delete
-                  </Button>
-                  <Button size="sm" onClick={() => setConfirmDelete(false)}>
-                    Cancel
-                  </Button>
-                </>
-              ) : (
-                <button onClick={() => setConfirmDelete(true)} className="text-ink-faint hover:text-tone-red">
-                  Delete this issue
-                </button>
-              )}
-            </div>
-          )}
 
           {issueAttachments.length > 0 && <Gallery attachments={issueAttachments} onDeleted={reloadDetail} />}
 
