@@ -12,9 +12,23 @@ Built for the Primis rollout, but nothing in it is Primis-specific.
 **Sites** — one row per domain, with the five tracks from the old sheet (video,
 display, ads.txt, ad tag, MCM) plus CMP, partner approval and notes. Every cell
 is editable in place, every column filterable and sortable. Domains can be
-added, archived or deleted. A domain with open issues is marked in the list;
-clicking it opens its detail page, where the test URL sits at the top — it is
-the first thing either side reaches for.
+added, archived or deleted. Clicking a domain opens its detail page, where the
+test URL sits at the top — it is the first thing either side reaches for.
+
+Each domain carries a traffic light, and it means one thing everywhere in the
+tool:
+
+| | |
+| --- | --- |
+| 🟢 green | all five tracks are **1 – Live** |
+| 🔴 red | at least one track is not; the detail page names which |
+| ⚪ grey | priority 99 — listed, but not part of the active rollout |
+
+Open issues are a separate signal: the issue count in its own column, and a
+tinted row.
+
+The legend above the table doubles as a filter — click *Not fully live* to see
+only the domains still being worked on.
 
 **Issues** — raised against a domain, with a type (*technical* or *revenue*), a
 category, a severity, an assignee and a due date. Screenshots can be attached to

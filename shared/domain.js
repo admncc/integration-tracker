@@ -132,8 +132,38 @@ export function rpmUplift(site, eurUsd = DEFAULT_EUR_USD) {
   return ((primis - previous) / previous) * 100;
 }
 
-/** A site is "done" when every track is live. Used for the rollout progress bar. */
+/** Priority 99 is the parking lot: listed, but not part of the active rollout. */
+export const INACTIVE_PRIORITY = 99;
+
+/**
+ * The traffic light on a domain, and the single definition of "live" the whole
+ * tool uses:
+ *
+ *   inactive   – priority 99, parked rather than being worked on
+ *   live       – all five integration tracks are Live
+ *   incomplete – anything else
+ *
+ * Note this is about the integration, not about open issues — those are shown
+ * by the issue count and the row highlight.
+ */
+export function siteReadiness(site) {
+  if (Number(site.priority) >= INACTIVE_PRIORITY) return 'inactive';
+  return TRACKS.every(({ key }) => site[key] === 'live') ? 'live' : 'incomplete';
+}
+
+export const READINESS = {
+  live: { tone: 'green', label: 'Live', dot: 'bg-tone-green' },
+  incomplete: { tone: 'red', label: 'Not fully live', dot: 'bg-tone-red' },
+  inactive: { tone: 'muted', label: 'Not active', dot: 'bg-tone-muted' },
+};
+
+/** The tracks still standing between a site and a green light. */
+export function missingTracks(site) {
+  return TRACKS.filter(({ key }) => site[key] !== 'live').map(({ label }) => label);
+}
+
+/** Share of tracks that are Live — the same yardstick as the traffic light. */
 export function siteCompletion(site) {
-  const done = TRACKS.filter(({ key }) => site[key] === 'live' || site[key] === 'na').length;
+  const done = TRACKS.filter(({ key }) => site[key] === 'live').length;
   return Math.round((done / TRACKS.length) * 100);
 }

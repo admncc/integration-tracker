@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { rpmUplift, siteCompletion, toBase, formatMoney } from '../shared/domain.js';
+import { missingTracks, rpmUplift, siteCompletion, siteReadiness, toBase, formatMoney } from '../shared/domain.js';
 
 test('toBase leaves EUR alone and divides USD by the rate', () => {
   assert.equal(toBase(5, 'EUR', 1.1662), 5);
@@ -41,11 +41,32 @@ test('formatMoney renders the currency it is given', () => {
   assert.equal(formatMoney(null, 'EUR'), '');
 });
 
-test('siteCompletion counts live and n/a tracks as done', () => {
-  const allLive = {
-    status_video: 'live', status_display: 'live', status_ads_txt: 'live', status_ad_tag: 'live', status_mcm: 'live',
-  };
-  assert.equal(siteCompletion(allLive), 100);
-  assert.equal(siteCompletion({ ...allLive, status_display: 'pending' }), 80);
-  assert.equal(siteCompletion({ ...allLive, status_video: 'na' }), 100);
+const ALL_LIVE = {
+  priority: 1,
+  status_video: 'live', status_display: 'live', status_ads_txt: 'live', status_ad_tag: 'live', status_mcm: 'live',
+};
+
+test('siteCompletion counts only tracks that are Live', () => {
+  assert.equal(siteCompletion(ALL_LIVE), 100);
+  assert.equal(siteCompletion({ ...ALL_LIVE, status_display: 'pending' }), 80);
+  assert.equal(siteCompletion({ ...ALL_LIVE, status_video: 'na' }), 80, 'n/a is a gap, not a pass');
+});
+
+test('a site is live only when all five tracks are Live', () => {
+  assert.equal(siteReadiness(ALL_LIVE), 'live');
+  for (const track of ['status_video', 'status_display', 'status_ads_txt', 'status_ad_tag', 'status_mcm']) {
+    assert.equal(siteReadiness({ ...ALL_LIVE, [track]: 'qa' }), 'incomplete', `${track} not Live must break it`);
+  }
+  assert.equal(siteReadiness({ ...ALL_LIVE, status_mcm: 'na' }), 'incomplete');
+});
+
+test('priority 99 is inactive whatever the tracks say', () => {
+  assert.equal(siteReadiness({ ...ALL_LIVE, priority: 99 }), 'inactive');
+  assert.equal(siteReadiness({ ...ALL_LIVE, priority: 99, status_video: 'pending' }), 'inactive');
+  assert.equal(siteReadiness({ ...ALL_LIVE, priority: 98 }), 'live');
+});
+
+test('missingTracks names exactly what is holding a site back', () => {
+  assert.deepEqual(missingTracks(ALL_LIVE), []);
+  assert.deepEqual(missingTracks({ ...ALL_LIVE, status_display: 'qa', status_mcm: 'pending' }), ['Display', 'MCM']);
 });

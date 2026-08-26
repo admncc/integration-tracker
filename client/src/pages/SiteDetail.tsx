@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { ActivityEntry, Issue, Site, User } from '../lib/types';
-import { APPROVAL, CMP, CURRENCIES, ISSUE_STATUS, TRACKS, TRACK_STATUS, formatMoney, rpmUplift, siteCompletion } from '@shared/domain.js';
+import { APPROVAL, CMP, CURRENCIES, ISSUE_STATUS, READINESS, TRACKS, TRACK_STATUS, formatMoney, missingTracks, rpmUplift, siteCompletion, siteReadiness } from '@shared/domain.js';
 import { Badge, Button, Empty, InlineSelect, InlineText, Modal, Spinner, Timestamp, type Tone } from '../components/ui';
 import IssueCard from '../components/IssueCard';
 import IssueModal from '../components/IssueModal';
@@ -81,6 +81,7 @@ export default function SiteDetail() {
   if (!site) return <Empty>{error || 'Site not found.'}</Empty>;
 
   const progress = siteCompletion(site);
+  const readiness = siteReadiness(site);
   const uplift = rpmUplift(site, eurUsd);
 
   return (
@@ -89,12 +90,19 @@ export default function SiteDetail() {
         <div className="min-w-0">
           <Link to="/sites" className="text-xs text-ink-faint hover:text-brand">← All sites</Link>
           <h1 className="flex items-center gap-2 text-lg font-semibold">
-            <span className={`size-2 rounded-full ${openCount > 0 ? 'bg-tone-red' : 'bg-tone-green'}`} aria-hidden />
+            <span className={`size-2.5 rounded-full ${READINESS[readiness].dot}`} aria-hidden />
             {site.domain}
           </h1>
           <p className="text-sm text-ink-soft">
+            <Badge tone={READINESS[readiness].tone as Tone}>{READINESS[readiness].label}</Badge>{' '}
             Priority {site.priority} · {openCount} open issue(s) · {doneCount} closed · added <Timestamp iso={site.created_at} />
           </p>
+          {readiness === 'incomplete' && (
+            <p className="text-xs text-tone-red">Still to go live: {missingTracks(site).join(', ')}</p>
+          )}
+          {readiness === 'inactive' && (
+            <p className="text-xs text-ink-faint">Priority 99 — parked. Give it a lower number to bring it into the rollout.</p>
+          )}
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
@@ -112,11 +120,14 @@ export default function SiteDetail() {
           <section className="card p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold">Integration status</h2>
-              <span className="text-xs text-ink-faint">{progress}% of tracks live</span>
+              <span className="text-xs text-ink-faint">{progress}% of the five tracks live</span>
             </div>
 
             <div className="mb-4 h-1.5 overflow-hidden rounded-full bg-line">
-              <div className="h-full rounded-full bg-tone-green transition-all" style={{ width: `${progress}%` }} />
+              <div
+                className={`h-full rounded-full transition-all ${progress === 100 ? 'bg-tone-green' : 'bg-tone-amber'}`}
+                style={{ width: `${progress}%` }}
+              />
             </div>
 
             <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

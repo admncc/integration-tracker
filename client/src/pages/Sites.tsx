@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Site, TrackStatus } from '../lib/types';
-import { APPROVAL, CMP, CURRENCIES, TRACKS, TRACK_STATUS, formatMoney, rpmUplift } from '@shared/domain.js';
+import { APPROVAL, CMP, CURRENCIES, READINESS, TRACKS, TRACK_STATUS, formatMoney, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
 import { Badge, Button, Empty, Field, InlineSelect, InlineText, Modal, Spinner, type Tone } from '../components/ui';
 import IssueModal from '../components/IssueModal';
 
@@ -69,6 +69,7 @@ export default function Sites() {
   const [filters, setFilters] = useState<FilterMap>({});
   const [sort, setSort] = useState<SortState>({ key: 'priority', dir: 1 });
   const [showArchived, setShowArchived] = useState(false);
+  const [readiness, setReadiness] = useState<'all' | 'live' | 'incomplete' | 'inactive'>('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
   const [removing, setRemoving] = useState<Site | null>(null);
@@ -111,6 +112,7 @@ export default function Sites() {
     const term = search.trim().toLowerCase();
     const rows = sites.filter((site) => {
       if (term && !`${site.domain} ${site.notes} ${site.managed_by}`.toLowerCase().includes(term)) return false;
+      if (readiness !== 'all' && siteReadiness(site) !== readiness) return false;
 
       return Object.entries(filters).every(([key, value]) => {
         if (!value) return true;
@@ -152,9 +154,15 @@ export default function Sites() {
       if (typeof left === 'number' && typeof right === 'number') return (left - right) * sort.dir;
       return String(left).localeCompare(String(right)) * sort.dir;
     });
-  }, [sites, filters, search, sort, eurUsd]);
+  }, [sites, filters, search, sort, eurUsd, readiness]);
 
-  const activeFilters = Object.values(filters).filter(Boolean).length + (search ? 1 : 0);
+  const activeFilters = Object.values(filters).filter(Boolean).length + (search ? 1 : 0) + (readiness === 'all' ? 0 : 1);
+
+  const readinessCounts = useMemo(() => {
+    const counts = { live: 0, incomplete: 0, inactive: 0 };
+    for (const site of sites) counts[siteReadiness(site)] += 1;
+    return counts;
+  }, [sites]);
 
   function toggleSort(key: string) {
     setSort((current) => (current.key === key ? { key, dir: current.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
@@ -200,7 +208,7 @@ export default function Sites() {
             onChange={(event) => setSearch(event.target.value)}
           />
           {activeFilters > 0 && (
-            <Button size="sm" onClick={() => { setFilters({}); setSearch(''); }}>
+            <Button size="sm" onClick={() => { setFilters({}); setSearch(''); setReadiness('all'); }}>
               Clear filters ({activeFilters})
             </Button>
           )}
@@ -217,6 +225,28 @@ export default function Sites() {
             </Button>
           )}
         </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-1.5 text-xs">
+        {(
+          [
+            ['live', `All five tracks live (${readinessCounts.live})`],
+            ['incomplete', `Not fully live (${readinessCounts.incomplete})`],
+            ['inactive', `Priority 99 — not active (${readinessCounts.inactive})`],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            onClick={() => setReadiness(readiness === key ? 'all' : key)}
+            aria-pressed={readiness === key}
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition ${
+              readiness === key ? 'border-brand bg-brand-soft text-brand-ink' : 'border-line text-ink-soft hover:bg-raised'
+            }`}
+          >
+            <span aria-hidden className={`size-2 rounded-full ${READINESS[key].dot}`} />
+            {label}
+          </button>
+        ))}
       </div>
 
       {notice && (
@@ -284,7 +314,7 @@ export default function Sites() {
                 key={site.id}
                 className={`border-b border-line last:border-0 hover:bg-raised/60 ${
                   (site.open_issues ?? 0) > 0 ? 'bg-tone-red-bg/25' : ''
-                }`}
+                } ${siteReadiness(site) === 'inactive' ? 'opacity-55' : ''}`}
               >
                 <td className="sticky left-0 z-10 bg-surface px-2 py-1.5">
                   <input type="checkbox" aria-label={`Select ${site.domain}`} checked={selected.has(site.id)} onChange={() => toggleRow(site.id)} />
@@ -444,17 +474,25 @@ function Cell({
   }
 
   if (column.key === 'domain') {
-    const open = site.open_issues ?? 0;
+    const readiness = siteReadiness(site);
+    const missing = missingTracks(site);
+    const title =
+      readiness === 'inactive'
+        ? 'Priority 99 — not part of the active rollout'
+        : readiness === 'live'
+          ? 'All five tracks are Live'
+          : `Not live yet: ${missing.join(', ')}`;
+
     return (
       <Link
         to={`/sites/${site.id}`}
-        className="group flex items-center gap-1.5 font-medium hover:text-brand"
-        title={open > 0 ? `${open} open issue(s) — open the site` : 'Open the site'}
+        className={`group flex items-center gap-1.5 font-medium hover:text-brand ${
+          readiness === 'inactive' ? 'text-ink-faint' : ''
+        }`}
+        title={title}
       >
-        <span
-          aria-hidden
-          className={`size-1.5 shrink-0 rounded-full ${open > 0 ? 'bg-tone-red' : 'bg-tone-green'}`}
-        />
+        <span aria-hidden className={`size-2 shrink-0 rounded-full ${READINESS[readiness].dot}`} />
+        <span className="sr-only">{READINESS[readiness].label}. </span>
         <span className="truncate group-hover:underline">{site.domain}</span>
       </Link>
     );

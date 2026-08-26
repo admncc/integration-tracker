@@ -46,7 +46,11 @@ metaRouter.get('/stats', (_req, res) => {
     .prepare(
       `SELECT
          (SELECT COUNT(*) FROM sites WHERE archived = 0) AS sites,
-         (SELECT COUNT(*) FROM sites WHERE archived = 0 AND status_video = 'live' AND status_display = 'live') AS fully_live,
+         (SELECT COUNT(*) FROM sites
+           WHERE archived = 0 AND priority < 99
+             AND status_video = 'live' AND status_display = 'live' AND status_ads_txt = 'live'
+             AND status_ad_tag = 'live' AND status_mcm = 'live') AS fully_live,
+         (SELECT COUNT(*) FROM sites WHERE archived = 0 AND priority >= 99) AS inactive,
          (SELECT COUNT(*) FROM issues WHERE status IN (${openPlaceholders})) AS open_issues,
          (SELECT COUNT(*) FROM issues WHERE status = 'ready_for_qa') AS awaiting_qa,
          (SELECT COUNT(*) FROM issues WHERE status = 'verified') AS verified`

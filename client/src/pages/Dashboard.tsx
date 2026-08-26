@@ -20,7 +20,8 @@ export default function Dashboard() {
 
   const cards = [
     { label: 'Sites tracked', value: totals.sites, to: '/sites' },
-    { label: 'Video + display live', value: totals.fully_live, to: '/sites', tone: 'green' as Tone },
+    { label: 'All five tracks live', value: totals.fully_live, to: '/sites', tone: 'green' as Tone },
+    { label: 'Not active (prio 99)', value: totals.inactive, to: '/sites', tone: 'muted' as Tone },
     { label: 'Open issues', value: totals.open_issues, to: '/issues?status=open', tone: totals.open_issues > 0 ? ('red' as Tone) : ('green' as Tone) },
     { label: 'Waiting on partner re-check', value: totals.awaiting_qa, to: '/issues?status=ready_for_qa', tone: 'blue' as Tone },
     { label: 'Verified fixes', value: totals.verified, to: '/issues?status=verified', tone: 'green' as Tone },
@@ -33,7 +34,7 @@ export default function Dashboard() {
         <p className="text-sm text-ink-soft">Where every site stands, and what is blocking the ones that are not live yet.</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
         {cards.map((card) => (
           <Link key={card.label} to={card.to} className="card p-4 transition hover:border-line-strong">
             <div className={`text-2xl font-semibold tabular-nums ${card.tone ? TONE_TEXT[card.tone] : ''}`}>{card.value}</div>

@@ -95,7 +95,7 @@ export interface ActivityEntry {
 }
 
 export interface Stats {
-  totals: { sites: number; fully_live: number; open_issues: number; awaiting_qa: number; verified: number };
+  totals: { sites: number; fully_live: number; inactive: number; open_issues: number; awaiting_qa: number; verified: number };
   trackBreakdown: Record<string, { label: string; counts: { status: TrackStatus; n: number }[] }>;
   issuesByStatus: { status: IssueStatus; n: number }[];
   issuesByType: { type: IssueType; n: number }[];
