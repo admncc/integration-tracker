@@ -23,7 +23,9 @@ export type Action = 'edit_site' | 'manage_sites' | 'delete_site' | 'manage_user
 const CAPABILITIES: Record<User['role'], Action[]> = {
   admin: ['edit_site', 'manage_sites', 'delete_site', 'manage_users', 'raise_issue', 'work_issue', 'verify_issue', 'import'],
   dev: ['edit_site', 'manage_sites', 'raise_issue', 'work_issue'],
-  partner: ['raise_issue', 'verify_issue'],
+  // The partner edits the sites table like anybody else; only archiving and
+  // deleting a domain stay with the publisher. See the note in routes/sites.js.
+  partner: ['edit_site', 'raise_issue', 'verify_issue'],
 };
 
 const SessionContext = createContext<SessionValue | null>(null);

@@ -68,8 +68,21 @@ const updateSchema = z.object(siteFields).partial().strict();
  * table unchecked, so a negative RPM the API rejects with a 400 went straight in
  * and then silently dropped the domain out of the dashboard comparison.
  */
-/** The partner owns approval and its own RPM figure; the rest is the publisher's. */
-const PARTNER_WRITABLE = new Set(['approval', 'rpm_primis', 'rpm_primis_currency']);
+/**
+ * The partner edits every column, the same as the publisher's own team.
+ *
+ * That is a deliberate choice of the publisher's: Primis runs the QA and is
+ * closest to what the tags are actually doing, so making them ask for a status
+ * change they have already verified only slows the rollout down. The trade is
+ * that a track can be set to Live by the company whose integration it is - the
+ * audit trail carries every change with a name and a time, and that is what the
+ * separation rests on now.
+ *
+ * Archiving stays out: it takes a domain out of the list for everyone, which is
+ * a lifecycle decision about the publisher's own inventory rather than a column
+ * in the table.
+ */
+const PARTNER_FORBIDDEN = new Set(['archived']);
 
 export const importRowSchema = z
   .object({ ...siteFields, notes: z.string().trim().max(20000) })
@@ -318,7 +331,7 @@ sitesRouter.patch('/bulk', requireRole('admin', 'dev', 'partner'), (req, res) =>
   }
 
   if (req.user.role === 'partner') {
-    const forbidden = fields.map(([field]) => field).filter((field) => !PARTNER_WRITABLE.has(field));
+    const forbidden = fields.map(([field]) => field).filter((field) => PARTNER_FORBIDDEN.has(field));
     if (forbidden.length) {
       return res.status(403).json({ error: `The partner side cannot change: ${forbidden.join(', ')}` });
     }
@@ -386,7 +399,7 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
   }
 
   if (req.user.role === 'partner') {
-    const forbidden = Object.keys(parsed.data).filter((field) => !PARTNER_WRITABLE.has(field));
+    const forbidden = Object.keys(parsed.data).filter((field) => PARTNER_FORBIDDEN.has(field));
     if (forbidden.length) {
       // Dropping these quietly and answering 200 told an API caller a write had
       // happened when it had not.

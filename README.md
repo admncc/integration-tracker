@@ -96,14 +96,26 @@ is understood. Sites and issues both export back to CSV.
 | --- | --- |
 | **Admin** | everything, plus users and the exchange rate |
 | **Developer** | edit sites, work issues, hand them back for re-check |
-| **Demand partner** | raise and verify issues, set approval and the Primis RPM |
+| **Demand partner** | edit every column on the sites table, raise and verify issues |
 
-The partner cannot edit track statuses or the previous-setup RPM, and no
-developer can mark anything **verified** - only the partner or an admin can.
-Both rules are enforced server-side, not just hidden in the interface. A
-developer can close an issue as **won't fix**, which is terminal too; that is
-deliberate, so a finding the publisher disagrees with does not sit open forever,
-and it shows in the history with their name on it.
+The partner edits the sites table exactly as the publisher's own team does.
+That is deliberate: Primis runs the QA and is closest to what the tags are
+actually doing, so making them ask for a status change they have already
+verified only slows the rollout down. The trade is that a track can be set to
+Live by the company whose integration it is - what the separation rests on is
+the audit trail, which carries every change with a name and a time on the
+domain's own page.
+
+Two things stay with the publisher: **archiving or deleting a domain**, which
+takes it out of the list for everyone, and **user accounts and the exchange
+rate**, which are admin-only.
+
+On issues the roles still differ: no developer can mark anything **verified** -
+only the partner or an admin can - and the partner changes an issue's status but
+not the text of somebody else's finding. Both are enforced server-side, not just
+hidden in the interface. A developer can close an issue as **won't fix**, which
+is terminal too; that is deliberate, so a finding the publisher disagrees with
+does not sit open forever, and it shows in the history with their name on it.
 
 ## Knowing it is your turn
 

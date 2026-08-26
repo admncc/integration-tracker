@@ -13,7 +13,6 @@ import SiteChat from '../components/SiteChat';
 const STATUS_OPTIONS = Object.entries(TRACK_STATUS).map(([value, meta]) => ({ value, label: meta.label }));
 const CMP_OPTIONS = Object.entries(CMP).map(([value, meta]) => ({ value, label: meta.label }));
 const APPROVAL_OPTIONS = Object.entries(APPROVAL).map(([value, meta]) => ({ value, label: meta.label }));
-const PARTNER_WRITABLE = new Set(['approval', 'rpm_primis', 'rpm_primis_currency', 'notes']);
 const CURRENCY_OPTIONS = CURRENCIES.map((value: string) => ({ value, label: value }));
 
 type IssueFilter = 'open' | 'all' | 'verified' | 'deleted';
@@ -21,7 +20,7 @@ type IssueFilter = 'open' | 'all' | 'verified' | 'deleted';
 export default function SiteDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { user, can, eurUsd } = useSession();
+  const { can, eurUsd } = useSession();
 
   const [site, setSite] = useState<Site | null>(null);
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -54,7 +53,12 @@ export default function SiteDetail() {
     api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0)));
   }, [load]);
 
-  const readOnly = (field: string) => (user?.role === 'partner' ? !PARTNER_WRITABLE.has(field) : !can('edit_site'));
+  /*
+   * One rule for everybody now: the partner edits the same columns the
+   * publisher's team does. Archiving and deleting a domain are separate
+   * capabilities and stay with the publisher.
+   */
+  const readOnly = (_field: string) => !can('edit_site');
 
   async function patchSite(field: string, raw: string) {
     if (!site) return;

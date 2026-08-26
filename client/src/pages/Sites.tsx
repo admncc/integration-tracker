@@ -103,10 +103,9 @@ export function parseDecimal(raw: string): number | null {
 }
 
 /** Fields the partner may change; everything else is publisher-owned. */
-const PARTNER_WRITABLE = new Set(['approval', 'rpm_primis', 'rpm_primis_currency', 'notes']);
 
 export default function Sites() {
-  const { user, can, eurUsd } = useSession();
+  const { can, eurUsd } = useSession();
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ tone: 'red' | 'green'; text: string } | null>(null);
@@ -144,7 +143,12 @@ export default function Sites() {
     return (weight: number) => `${((weight / total) * 100).toFixed(3)}%`;
   }, [columns]);
 
-  const readOnly = (field: string) => (user?.role === 'partner' ? !PARTNER_WRITABLE.has(field) : !can('edit_site'));
+  /*
+   * One rule for everybody now: the partner edits the same columns the
+   * publisher's team does. Archiving and deleting a domain are separate
+   * capabilities and stay with the publisher.
+   */
+  const readOnly = (_field: string) => !can('edit_site');
 
   const reload = useCallback(() => {
     setLoading(true);
