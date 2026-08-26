@@ -149,7 +149,13 @@ export function csvToSites(text) {
 
   const present = new Set(header.filter(Boolean));
   const parsers = {
-    priority: (v) => Number.parseInt(v, 10) || 99,
+    // The API bounds priority to 1-99. `|| 99` also swallowed a legitimate 0,
+    // silently parking every domain a sheet marked as top priority.
+    priority: (v) => {
+      const n = Number.parseInt(v, 10);
+      if (!Number.isFinite(n)) return 99;
+      return Math.min(99, Math.max(1, n));
+    },
     test_url: (v) => String(v ?? '').trim(),
     status_video: parseStatus,
     status_display: parseStatus,

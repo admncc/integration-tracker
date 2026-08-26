@@ -25,11 +25,21 @@ export default function SiteChat({
   onChange: (messages: SiteMessage[]) => void;
 }) {
   const { user } = useSession();
+  const live = messages.filter((m) => !m.deleted_at).length;
+  const deletedCount = messages.length - live;
   const [body, setBody] = useState('');
   const [replyTo, setReplyTo] = useState<SiteMessage | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const composer = useRef<HTMLTextAreaElement>(null);
+  const thread = useRef<HTMLDivElement>(null);
+
+  // The thread opens on the newest message, and follows a new one down; without
+  // this, pressing Send looked like nothing happened.
+  useEffect(() => {
+    const box = thread.current;
+    if (box) box.scrollTop = box.scrollHeight;
+  }, [messages.length]);
 
   useEffect(() => {
     if (replyTo) composer.current?.focus();
@@ -57,23 +67,33 @@ export default function SiteChat({
 
   async function remove(message: SiteMessage) {
     try {
-      await api.del(`/sites/${siteId}/messages/${message.id}`);
-      onChange(messages.map((m) => (m.id === message.id ? { ...m, deleted_at: new Date().toISOString(), body: '' } : m)));
+      const { message: saved } = await api.del<{ message: SiteMessage }>(`/sites/${siteId}/messages/${message.id}`);
+      onChange(messages.map((m) => (m.id === message.id ? saved : m)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not delete the message');
     }
   }
 
+  async function restore(message: SiteMessage) {
+    try {
+      const { message: saved } = await api.post<{ message: SiteMessage }>(`/sites/${siteId}/messages/${message.id}/restore`);
+      onChange(messages.map((m) => (m.id === message.id ? saved : m)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not restore the message');
+    }
+  }
+
   return (
-    <section className="card flex flex-col">
+    <section className="card flex min-w-0 flex-col">
       <header className="flex items-center justify-between border-b border-line px-4 py-3">
         <h2 className="text-sm font-semibold">Discussion</h2>
         <span className="text-xs text-ink-faint">
-          {messages.length === 0 ? 'Nothing yet' : `${messages.length} message${messages.length === 1 ? '' : 's'}`}
+          {live === 0 ? 'Nothing yet' : `${live} message${live === 1 ? '' : 's'}`}
+          {deletedCount > 0 && ` · ${deletedCount} deleted`}
         </span>
       </header>
 
-      <div className="max-h-[28rem] space-y-3 overflow-y-auto px-4 py-3">
+      <div ref={thread} className="max-h-[28rem] space-y-3 overflow-y-auto px-4 py-3">
         {messages.length === 0 && (
           <p className="py-4 text-center text-sm text-ink-faint">
             Ask a question about this domain here - everyone with access can answer.
@@ -85,11 +105,11 @@ export default function SiteChat({
           const badge = message.author_role ? ROLE_BADGE[message.author_role] : null;
 
           return (
-            <article key={message.id} className="group rounded-lg border border-line bg-raised/40 px-3 py-2">
+            <article key={message.id} className="group min-w-0 rounded-lg border border-line bg-raised/40 px-3 py-2">
               {message.reply_to_id && (
                 <div className="mb-1.5 border-l-2 border-line-strong pl-2 text-xs text-ink-faint">
                   <span className="font-medium">{message.reply_to_author ?? 'Deleted user'}</span>{' '}
-                  <span className="line-clamp-2">
+                  <span className="line-clamp-2 [overflow-wrap:anywhere]">
                     {message.reply_to_deleted_at ? <em>message deleted</em> : message.reply_to_body}
                   </span>
                 </div>
@@ -115,9 +135,16 @@ export default function SiteChat({
               </header>
 
               {message.deleted_at ? (
-                <p className="mt-1 text-sm text-ink-faint italic">This message was deleted.</p>
+                <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-ink-faint italic">
+                  This message was deleted.
+                  {(mine || user?.role === 'admin') && (
+                    <button onClick={() => restore(message)} className="text-xs font-medium text-brand not-italic hover:underline">
+                      Restore
+                    </button>
+                  )}
+                </p>
               ) : (
-                <p className="mt-1 text-sm whitespace-pre-wrap">{message.body}</p>
+                <p className="mt-1 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{message.body}</p>
               )}
             </article>
           );
@@ -129,7 +156,7 @@ export default function SiteChat({
           <div className="flex items-start gap-2 rounded-lg bg-brand-soft px-2.5 py-1.5 text-xs text-brand-ink">
             <span className="min-w-0 flex-1">
               Replying to <span className="font-medium">{replyTo.author_name ?? 'a message'}</span>:{' '}
-              <span className="line-clamp-1">{replyTo.body}</span>
+              <span className="line-clamp-1 [overflow-wrap:anywhere]">{replyTo.body}</span>
             </span>
             <button type="button" onClick={() => setReplyTo(null)} aria-label="Cancel reply">
               ✕

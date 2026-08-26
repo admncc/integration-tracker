@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { Issue, Site, User } from '../lib/types';
@@ -30,10 +30,13 @@ const FILTERS = [
 export default function Issues() {
   const [params, setParams] = useSearchParams();
   const [issues, setIssues] = useState<Issue[]>([]);
+  const [total, setTotal] = useState(0);
+  const [truncated, setTruncated] = useState(false);
   const [sites, setSites] = useState<Site[]>([]);
   const [users, setUsers] = useState<User[]>([]);
   const [loading, setLoading] = useState(true);
   const [composing, setComposing] = useState(false);
+  const [notice, setNotice] = useState('');
 
   // The URL is the source of truth for filters, so a view can be shared as a link.
   const query = params.toString();
@@ -43,8 +46,12 @@ export default function Issues() {
     const search = new URLSearchParams(params);
     if (!search.has('status')) search.set('status', 'open');
     return api
-      .get<{ issues: Issue[] }>(`/issues?${search.toString()}`)
-      .then((r) => setIssues(r.issues))
+      .get<{ issues: Issue[]; total: number; truncated: boolean }>(`/issues?${search.toString()}`)
+      .then((r) => {
+        setIssues(r.issues);
+        setTotal(r.total ?? r.issues.length);
+        setTruncated(Boolean(r.truncated));
+      })
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
@@ -53,8 +60,33 @@ export default function Issues() {
     load();
   }, [load]);
 
+  /*
+   * A stale or mistyped link used to show an empty tracker while every dropdown
+   * read as its default. Unknown values are dropped and named.
+   */
+  const [ignored, setIgnored] = useState<string[]>([]);
   useEffect(() => {
-    api.get<{ sites: Site[] }>('/sites').then((r) => setSites(r.sites));
+    const allowed: Record<string, string[]> = Object.fromEntries(
+      FILTERS.map((filter) => [filter.key, filter.options.map(([value]) => value)])
+    );
+    const next = new URLSearchParams(params);
+    const dropped: string[] = [];
+    for (const [key, values] of Object.entries(allowed)) {
+      const value = next.get(key);
+      if (value && !values.includes(value)) {
+        dropped.push(`${key}=${value}`);
+        next.delete(key);
+      }
+    }
+    if (dropped.length) {
+      setIgnored(dropped);
+      setParams(next, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  useEffect(() => {
+    api.get<{ sites: Site[] }>('/sites?archived=1').then((r) => setSites(r.sites));
     api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0)));
   }, []);
 
@@ -63,6 +95,13 @@ export default function Issues() {
     value ? next.set(key, value) : next.delete(key);
     setParams(next, { replace: true });
   }
+
+  // The export mirrors the list exactly, filters and all.
+  const exportHref = useMemo(() => {
+    const search = new URLSearchParams(params);
+    if (!search.has('status')) search.set('status', 'open');
+    return `/api/issues/export.csv?${search.toString()}`;
+  }, [params]);
 
   const siteId = params.get('site_id');
   const activeSite = sites.find((s) => String(s.id) === siteId);
@@ -73,8 +112,9 @@ export default function Issues() {
         <div>
           <h1 className="text-lg font-semibold">Issues</h1>
           <p className="text-sm text-ink-soft">
-            {issues.length} shown{activeSite && ` on ${activeSite.domain}`}
-            {params.get('batch') && ' · one batch'}
+            {truncated ? `${issues.length} of ${total} shown` : `${issues.length} shown`}
+            {activeSite && ` on ${activeSite.domain}`}
+            {params.get('batch_id') && ' · one batch'}
           </p>
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -84,10 +124,7 @@ export default function Issues() {
             value={params.get('q') ?? ''}
             onChange={(event) => setFilter('q', event.target.value)}
           />
-          <a
-            href={`/api/issues/export.csv${params.get('status') && params.get('status') !== 'open' ? '?status=all' : ''}`}
-            className="rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-raised"
-          >
+          <a href={exportHref} className="rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-raised">
             Export CSV
           </a>
           <Button variant="primary" onClick={() => setComposing(true)} disabled={sites.length === 0}>
@@ -95,6 +132,21 @@ export default function Issues() {
           </Button>
         </div>
       </div>
+
+      {notice && <p className="rounded-lg bg-tone-amber-bg px-3 py-2 text-sm text-tone-amber">{notice}</p>}
+
+      {ignored.length > 0 && (
+        <p className="rounded-lg bg-tone-amber-bg px-3 py-2 text-sm text-tone-amber">
+          Ignored an unknown filter in the link: {ignored.join(', ')}
+        </p>
+      )}
+
+      {truncated && (
+        <p className="rounded-lg bg-tone-amber-bg px-3 py-2 text-sm text-tone-amber">
+          Only the first {issues.length} of {total} issues are listed. Narrow the filters to see the rest, or export the
+          full list as CSV.
+        </p>
+      )}
 
       <div className="card flex flex-wrap items-end gap-3 p-3">
         {FILTERS.map((filter) => (
@@ -118,7 +170,10 @@ export default function Issues() {
           <select className="field !w-auto !py-1" value={siteId ?? ''} onChange={(event) => setFilter('site_id', event.target.value)}>
             <option value="">All sites</option>
             {sites.map((site) => (
-              <option key={site.id} value={site.id}>{site.domain}</option>
+              <option key={site.id} value={site.id}>
+                {site.domain}
+                {site.archived ? ' (archived)' : ''}
+              </option>
             ))}
           </select>
         </label>
@@ -176,8 +231,9 @@ export default function Issues() {
           domains={activeSite ? [activeSite.domain] : []}
           selectableSites={siteId ? undefined : sites}
           onClose={() => setComposing(false)}
-          onCreated={() => {
+          onCreated={(_count, _issue, uploadErrors) => {
             setComposing(false);
+            if (uploadErrors?.length) setNotice(`The issue was created, but a screenshot did not attach: ${uploadErrors[0]}`);
             load();
           }}
         />

@@ -1,9 +1,13 @@
 /** Thin fetch wrapper: cookies always ride along, errors surface as thrown `Error`s. */
 export class ApiError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  /** The body the server sent; a 409 carries the current state of the record. */
+  payload: Record<string, unknown>;
+
+  constructor(message: string, status: number, payload: Record<string, unknown> = {}) {
     super(message);
     this.status = status;
+    this.payload = payload;
   }
 }
 
@@ -18,7 +22,11 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new ApiError((payload as { error?: string }).error ?? `Request failed (${response.status})`, response.status);
+    const error = new ApiError(
+      (payload as { error?: string }).error ?? `Request failed (${response.status})`,
+      response.status,
+      payload as Record<string, unknown>
+    );
     // A session that expired mid-visit should return to the sign-in form, not
     // leave every page rendering its own "Not signed in".
     if (response.status === 401 && !path.startsWith('/auth/')) {

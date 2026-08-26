@@ -10,6 +10,9 @@ import { toCsv } from '../lib/sheet.js';
 export const issuesRouter = Router();
 issuesRouter.use(requireAuth);
 
+/** One page of results; the response says when it had to cut the list short. */
+const LIST_LIMIT = 500;
+
 const typeEnum = z.enum(Object.keys(ISSUE_TYPE));
 const categoryEnum = z.enum(Object.keys(ISSUE_CATEGORY));
 const severityEnum = z.enum(Object.keys(SEVERITY));
@@ -52,38 +55,57 @@ const baseIssue = {
     .or(z.literal('').transform(() => null)),
 };
 
-issuesRouter.get('/', (req, res) => {
+/**
+ * Shared by the list and the CSV export so the two can never disagree about
+ * what "the current view" means.
+ */
+function buildIssueFilter(query) {
   const where = [];
   const params = [];
 
   // A deleted issue is only ever returned when it is explicitly asked for.
-  if (req.query.status === 'deleted') {
+  if (query.status === 'deleted') {
     where.push('i.deleted_at IS NOT NULL');
   } else {
     where.push('i.deleted_at IS NULL');
     // `all` is the explicit "no status filter"; an absent param is not the same thing.
-    if (req.query.status === 'all') {
+    if (query.status === 'all') {
       // nothing further to add
-    } else if (req.query.status === 'open') {
+    } else if (query.status === 'open') {
       where.push(`i.status IN (${OPEN_ISSUE_STATUSES.map(() => '?').join(',')})`);
       params.push(...OPEN_ISSUE_STATUSES);
-    } else if (req.query.status) {
+    } else if (query.status) {
       where.push('i.status = ?');
-      params.push(req.query.status);
+      params.push(query.status);
     }
   }
-  for (const [param, column] of [['site_id', 'i.site_id'], ['type', 'i.type'], ['severity', 'i.severity'], ['category', 'i.category'], ['assignee_id', 'i.assignee_id'], ['batch_id', 'i.batch_id']]) {
-    if (req.query[param]) {
+
+  for (const [param, column] of [
+    ['site_id', 'i.site_id'],
+    ['type', 'i.type'],
+    ['severity', 'i.severity'],
+    ['category', 'i.category'],
+    ['assignee_id', 'i.assignee_id'],
+    ['batch_id', 'i.batch_id'],
+  ]) {
+    if (query[param]) {
       where.push(`${column} = ?`);
-      params.push(req.query[param]);
+      params.push(query[param]);
     }
   }
-  if (req.query.q) {
+
+  if (query.q) {
     // Without escaping, a search for "%" or "_" matched every row.
     where.push(`(i.title LIKE ? ESCAPE '\\' OR i.description LIKE ? ESCAPE '\\' OR s.domain LIKE ? ESCAPE '\\')`);
-    const like = `%${String(req.query.q).replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
+    const like = `%${String(query.q).replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
     params.push(like, like, like);
   }
+
+  return { where, params };
+}
+
+issuesRouter.get('/', (req, res) => {
+  const { where, params } = buildIssueFilter(req.query);
 
   const issues = db
     .prepare(
@@ -100,34 +122,47 @@ issuesRouter.get('/', (req, res) => {
         ORDER BY CASE i.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'ready_for_qa' THEN 2 WHEN 'verified' THEN 3 ELSE 4 END,
                  CASE i.severity WHEN 'blocker' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
                  s.priority ASC, i.id DESC
-        LIMIT 500`
+        LIMIT ${LIST_LIMIT}`
     )
     .all(...params);
 
-  res.json({ issues });
+  // The cap used to be invisible: the header printed the truncated length as fact
+  // while the dashboard counted the real total.
+  const total = db
+    .prepare(`SELECT COUNT(*) AS n FROM issues i JOIN sites s ON s.id = i.site_id WHERE ${where.join(' AND ')}`)
+    .get(...params).n;
+
+  res.json({ issues, total, limit: LIST_LIMIT, truncated: total > issues.length });
 });
 
-/** The issue list as a spreadsheet, for status reports outside the tool. */
+/**
+ * The issue list as a spreadsheet. It applies the same filters as the list, so
+ * the button next to a filtered view exports that view rather than everything.
+ */
 issuesRouter.get('/export.csv', (req, res) => {
-  const onlyOpen = req.query.status !== 'all';
+  const { where, params } = buildIssueFilter(req.query);
+
   const rows = db
     .prepare(
       `SELECT i.id, s.domain, s.priority, i.type, i.category, i.severity, i.status, i.title,
               r.name AS reporter, a.name AS assignee, i.due_date, i.created_at, i.updated_at, i.closed_at,
+              i.deleted_at, d.name AS deleted_by,
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comments,
               (SELECT COUNT(*) FROM attachments at WHERE at.issue_id = i.id) AS images
          FROM issues i
          JOIN sites s ON s.id = i.site_id
          LEFT JOIN users r ON r.id = i.reporter_id
          LEFT JOIN users a ON a.id = i.assignee_id
-        WHERE i.deleted_at IS NULL${onlyOpen ? ` AND i.status IN (${OPEN_ISSUE_STATUSES.map(() => '?').join(',')})` : ''}
+         LEFT JOIN users d ON d.id = i.deleted_by
+        WHERE ${where.join(' AND ')}
         ORDER BY s.priority, s.domain, i.id`
     )
-    .all(...(onlyOpen ? OPEN_ISSUE_STATUSES : []));
+    .all(...params);
 
   const header = [
     'ID', 'Domain', 'Prio', 'Type', 'Category', 'Severity', 'Status', 'Title',
-    'Raised by', 'Assignee', 'Due', 'Created', 'Updated', 'Closed', 'Comments', 'Images',
+    'Raised by', 'Assignee', 'Due', 'Created', 'Updated', 'Closed', 'Deleted', 'Deleted by',
+    'Comments', 'Images',
   ];
   const body = rows.map((row) => [
     row.id, row.domain, row.priority,
@@ -136,11 +171,12 @@ issuesRouter.get('/export.csv', (req, res) => {
     SEVERITY[row.severity]?.label ?? row.severity,
     ISSUE_STATUS[row.status]?.label ?? row.status,
     row.title, row.reporter ?? '', row.assignee ?? '', row.due_date ?? '',
-    row.created_at, row.updated_at, row.closed_at ?? '', row.comments, row.images,
+    row.created_at, row.updated_at, row.closed_at ?? '', row.deleted_at ?? '', row.deleted_by ?? '',
+    row.comments, row.images,
   ]);
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="issues-${onlyOpen ? 'open' : 'all'}.csv"`);
+  res.setHeader('Content-Disposition', `attachment; filename="issues-${req.query.status ?? 'open'}.csv"`);
   res.send(toCsv([header, ...body]));
 });
 
@@ -241,7 +277,8 @@ issuesRouter.post('/bulk', (req, res) => {
     insertIssue({ ...fields, site_id: site.id, reporter_id: req.user.id, batch_id: batchId }, req.user.id, site.domain)
   );
 
-  res.status(201).json({ batch_id: batchId, created: created.length, issues: created });
+  const missing = uniqueIds.filter((id) => !sites.some((site) => site.id === id));
+  res.status(201).json({ batch_id: batchId, created: created.length, skipped: missing, issues: created });
 });
 
 issuesRouter.patch('/:id', (req, res) => {
@@ -250,6 +287,19 @@ issuesRouter.patch('/:id', (req, res) => {
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
 
   if (issue.deleted_at) return res.status(409).json({ error: 'This issue is deleted. Restore it first.' });
+
+  /*
+   * Optimistic concurrency. Without it a dev handing an issue back and a partner
+   * verifying it at the same moment produced one silent winner, and the loser's
+   * screen went on claiming its own result indefinitely.
+   */
+  const expected = req.body?.expected_updated_at;
+  if (expected && expected !== issue.updated_at) {
+    return res.status(409).json({
+      error: 'Somebody else changed this issue while you had it open. It has been refreshed.',
+      issue,
+    });
+  }
 
   const parsed = z
     .object({ ...baseIssue, status: statusEnum })
@@ -293,13 +343,15 @@ issuesRouter.patch('/:id', (req, res) => {
     });
   }
 
-  res.json({ issue: db.prepare('SELECT * FROM issues WHERE id = ?').get(id) });
+  res.json({ issue: issueRow(id) });
 });
 
 issuesRouter.post('/:id/comments', (req, res) => {
   const id = Number(req.params.id);
   const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
+
+  if (issue.deleted_at) return res.status(409).json({ error: 'This issue is deleted. Restore it first.' });
 
   const parsed = z.object({ body: z.string().trim().min(1).max(20000) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Comment cannot be empty' });
@@ -328,6 +380,8 @@ issuesRouter.post(
     const id = Number(req.params.id);
     const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
     if (!issue) return res.status(404).json({ error: 'Issue not found' });
+
+    if (issue.deleted_at) return res.status(409).json({ error: 'This issue is deleted. Restore it first.' });
 
     const mime = String(req.headers['content-type'] ?? '').split(';')[0].trim();
     if (!ALLOWED_MIME.includes(mime)) {
@@ -387,7 +441,13 @@ issuesRouter.get('/attachments/:attachmentId/raw', (req, res) => {
   res.setHeader('Content-Length', attachment.size);
   res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
   // Never render an upload inline as markup, whatever the stored mime claims.
-  res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(attachment.filename)}"`);
+  // filename* carries the real name; the plain filename is the ASCII fallback,
+  // otherwise a saved file ends up called "mein%20sch%C3%B6nes%20bild.png".
+  const ascii = attachment.filename.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
+  res.setHeader(
+    'Content-Disposition',
+    `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`
+  );
   res.setHeader('X-Content-Type-Options', 'nosniff');
 
   createReadStream(uploadPath(attachment.storage_key))
@@ -416,7 +476,7 @@ issuesRouter.delete('/:id', (req, res) => {
   const id = Number(req.params.id);
   const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
-  if (issue.deleted_at) return res.json({ ok: true, issue });
+  if (issue.deleted_at) return res.json({ ok: true, issue: issueRow(id) });
   if (req.user.role !== 'admin' && issue.reporter_id !== req.user.id) {
     return res.status(403).json({ error: 'Only the reporter or an admin can delete an issue' });
   }
@@ -424,14 +484,14 @@ issuesRouter.delete('/:id', (req, res) => {
   db.prepare("UPDATE issues SET deleted_at = datetime('now'), deleted_by = ?, updated_at = datetime('now') WHERE id = ?").run(req.user.id, id);
   logActivity({ siteId: issue.site_id, issueId: id, actorId: req.user.id, kind: 'issue_deleted', newValue: issue.title });
 
-  res.json({ ok: true, issue: db.prepare('SELECT * FROM issues WHERE id = ?').get(id) });
+  res.json({ ok: true, issue: issueRow(id) });
 });
 
 issuesRouter.post('/:id/restore', (req, res) => {
   const id = Number(req.params.id);
   const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
-  if (!issue.deleted_at) return res.json({ ok: true, issue });
+  if (!issue.deleted_at) return res.json({ ok: true, issue: issueRow(id) });
   if (req.user.role !== 'admin' && issue.reporter_id !== req.user.id && issue.deleted_by !== req.user.id) {
     return res.status(403).json({ error: 'Only the reporter, whoever deleted it, or an admin can restore an issue' });
   }
@@ -439,7 +499,7 @@ issuesRouter.post('/:id/restore', (req, res) => {
   db.prepare("UPDATE issues SET deleted_at = NULL, deleted_by = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
   logActivity({ siteId: issue.site_id, issueId: id, actorId: req.user.id, kind: 'issue_restored', newValue: issue.title });
 
-  res.json({ ok: true, issue: db.prepare('SELECT * FROM issues WHERE id = ?').get(id) });
+  res.json({ ok: true, issue: issueRow(id) });
 });
 
 /** Zod's first concrete complaint beats a generic "Invalid issue data". */
@@ -448,6 +508,21 @@ function firstMessage(error) {
   if (!issue) return 'Invalid issue data';
   const field = issue.path?.join('.');
   return field && !issue.message.toLowerCase().includes(field) ? `${field}: ${issue.message}` : issue.message;
+}
+
+/** One shape for an issue row, so a card never has to guess at a missing name. */
+function issueRow(id) {
+  return db
+    .prepare(
+      `SELECT i.*, s.domain, r.name AS reporter_name, a.name AS assignee_name, d.name AS deleted_by_name
+         FROM issues i
+         JOIN sites s ON s.id = i.site_id
+         LEFT JOIN users r ON r.id = i.reporter_id
+         LEFT JOIN users a ON a.id = i.assignee_id
+         LEFT JOIN users d ON d.id = i.deleted_by
+        WHERE i.id = ?`
+    )
+    .get(id);
 }
 
 function insertIssue(fields, actorId, domain) {

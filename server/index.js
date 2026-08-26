@@ -18,6 +18,32 @@ export const app = express();
 app.disable('x-powered-by');
 // Behind a reverse proxy, set TRUST_PROXY=1 so req.ip and secure cookies are correct.
 if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
+/*
+ * The tool sits behind a login and links out to third-party test pages, so it
+ * should not be framable and should not leak its URLs in a referer. The CSP is
+ * deliberately narrow: everything the SPA needs is same-origin, and images may
+ * come from data: URIs for the file previews in the upload dialog.
+ */
+app.use((_req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    [
+      "default-src 'self'",
+      "img-src 'self' data: blob:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self'",
+      "connect-src 'self'",
+      "frame-ancestors 'none'",
+      "base-uri 'self'",
+      "form-action 'self'",
+    ].join('; ')
+  );
+  next();
+});
+
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 app.use(attachUser);

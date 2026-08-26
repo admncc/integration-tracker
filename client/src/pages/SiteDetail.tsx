@@ -122,8 +122,8 @@ export default function SiteDetail() {
 
       {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{error}</p>}
 
-      <div className="grid gap-4 lg:grid-cols-[2fr_1fr]">
-        <div className="space-y-4">
+      <div className="grid min-w-0 gap-4 lg:grid-cols-[2fr_1fr]">
+        <div className="min-w-0 space-y-4">
           <section className="card p-4">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold">Integration status</h2>
@@ -327,9 +327,10 @@ export default function SiteDetail() {
           siteIds={[site.id]}
           domains={[site.domain]}
           onClose={() => setComposing(false)}
-          onCreated={() => {
+          onCreated={(_count, _issue, uploadErrors) => {
             setComposing(false);
             setFilter('open');
+            if (uploadErrors?.length) setError(`The issue was created, but a screenshot did not attach: ${uploadErrors[0]}`);
             load();
           }}
         />

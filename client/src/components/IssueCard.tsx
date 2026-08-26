@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { api } from '../lib/api';
+import { ApiError, api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Attachment, Comment, Issue, IssueStatus, User } from '../lib/types';
 import { ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY } from '@shared/domain.js';
@@ -96,11 +96,22 @@ export default function IssueCard({
   async function update(patch: Partial<Issue>) {
     setError('');
     try {
-      const { issue: saved } = await api.patch<{ issue: Issue }>(`/issues/${issue.id}`, patch);
+      // The version we last saw travels with the change, so a simultaneous edit
+      // by somebody else is reported instead of silently overwritten.
+      const { issue: saved } = await api.patch<{ issue: Issue }>(`/issues/${issue.id}`, {
+        ...patch,
+        expected_updated_at: issue.updated_at,
+      });
       const merged = { ...issue, ...saved };
       setIssue(merged);
       onChanged?.(merged);
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.payload?.issue) {
+        // Show what is actually stored rather than what we hoped for.
+        const fresh = { ...issue, ...(err.payload.issue as Issue) };
+        setIssue(fresh);
+        onChanged?.(fresh);
+      }
       setError(err instanceof Error ? err.message : 'Could not save the change');
     }
   }
@@ -147,7 +158,9 @@ export default function IssueCard({
 
           <button
             onClick={() => setOpen(!open)}
-            className={`mt-1 block text-left text-sm font-medium hover:text-brand ${deleted ? 'line-through decoration-1' : ''}`}
+            className={`mt-1 block text-left text-sm font-medium [overflow-wrap:anywhere] hover:text-brand ${
+              deleted ? 'line-through decoration-1' : ''
+            }`}
           >
             {issue.title}
           </button>
@@ -232,7 +245,9 @@ export default function IssueCard({
 
       {open && (
         <div className="space-y-4 border-t border-line bg-raised/40 px-4 py-4">
-          {issue.description && <p className="text-sm whitespace-pre-wrap text-ink-soft">{issue.description}</p>}
+          {issue.description && (
+            <p className="text-sm whitespace-pre-wrap text-ink-soft [overflow-wrap:anywhere]">{issue.description}</p>
+          )}
 
           {user?.role !== 'partner' && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
@@ -259,9 +274,15 @@ export default function IssueCard({
 
           {loading && <p className="text-xs text-ink-faint">Loading conversation...</p>}
 
+          {deleted && (
+            <p className="text-xs text-ink-faint">
+              This issue is deleted. Restore it to comment or attach anything.
+            </p>
+          )}
+
           {issueAttachments.length > 0 && <Gallery attachments={issueAttachments} onDeleted={reloadDetail} />}
 
-          {detail && (
+          {detail && !deleted && (
             <Thread
               issueId={issue.id}
               comments={detail.comments}
@@ -393,7 +414,7 @@ function Thread({
               )}
               <Timestamp iso={comment.created_at} className="text-ink-faint" />
             </header>
-            <p className="mt-1 text-sm whitespace-pre-wrap">{comment.body}</p>
+            <p className="mt-1 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">{comment.body}</p>
             {images.length > 0 && (
               <div className="mt-2">
                 <Gallery attachments={images} onDeleted={onDeleted} />

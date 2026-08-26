@@ -95,5 +95,14 @@ authRouter.post('/password', requireAuth, (req, res) => {
     return res.status(400).json({ error: 'Current password is wrong' });
   }
   db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(hashPassword(parsed.data.next), req.user.id);
-  res.json({ ok: true });
+
+  /*
+   * Changing a password is the standard answer to a stolen session, so every
+   * other session of this user goes with it. The current one stays, otherwise
+   * the change would sign you out of the page you just used.
+   */
+  const current = req.cookies?.[SESSION_COOKIE];
+  const { changes } = db.prepare('DELETE FROM sessions WHERE user_id = ? AND id != ?').run(req.user.id, current ?? '');
+
+  res.json({ ok: true, other_sessions_ended: changes });
 });

@@ -12,6 +12,17 @@ type Payload = {
   siblings: { id: number; status: keyof typeof ISSUE_STATUS; domain: string }[];
 };
 
+/** Column names are not user-facing wording. */
+const FIELD_LABELS: Record<string, string> = {
+  title: 'the title',
+  description: 'the description',
+  type: 'the type',
+  category: 'the category',
+  severity: 'the severity',
+  assignee_id: 'the assignee',
+  due_date: 'the due date',
+};
+
 /** Same wording as the site history, so an event reads alike wherever it shows. */
 function describe(entry: ActivityEntry) {
   switch (entry.kind) {
@@ -25,8 +36,13 @@ function describe(entry: ActivityEntry) {
       return `attached ${entry.new_value}`;
     case 'issue_status':
       return `changed status to ${ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value}`;
-    default:
-      return entry.field ? `changed ${entry.field}` : 'made a change';
+    default: {
+      const label = FIELD_LABELS[entry.field ?? ''] ?? entry.field;
+      if (!label) return 'made a change';
+      return entry.old_value
+        ? `changed ${label} from "${entry.old_value}" to "${entry.new_value ?? 'nothing'}"`
+        : `set ${label} to "${entry.new_value ?? 'nothing'}"`;
+    }
   }
 }
 

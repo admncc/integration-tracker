@@ -58,7 +58,12 @@ export function safeFilename(raw) {
     .join('')
     .replaceAll('\\', '_')
     .replaceAll('/', '_')
-    .trim()
-    .slice(0, 120);
-  return name || 'screenshot';
+    .trim();
+
+  if (name.length <= 120) return name || 'screenshot';
+
+  // Cutting at 120 used to take the extension with it.
+  const dot = name.lastIndexOf('.');
+  const extension = dot > 0 && name.length - dot <= 12 ? name.slice(dot) : '';
+  return name.slice(0, 120 - extension.length) + extension;
 }

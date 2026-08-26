@@ -22,15 +22,15 @@ metaRouter.get('/stats', (_req, res) => {
     ])
   );
 
-  const issuesByStatus = db.prepare('SELECT status, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL GROUP BY status').all();
+  const issuesByStatus = db.prepare('SELECT i.status AS status, COUNT(*) AS n FROM issues i JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND s.archived = 0 GROUP BY i.status').all();
   const issuesBySeverity = db
-    .prepare(`SELECT severity, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders}) GROUP BY severity`)
+    .prepare(`SELECT severity, COUNT(*) AS n FROM issues i JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND s.archived = 0 AND i.status IN (${openPlaceholders}) GROUP BY severity`)
     .all(...OPEN_ISSUE_STATUSES);
   const issuesByType = db
-    .prepare(`SELECT type, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders}) GROUP BY type`)
+    .prepare(`SELECT type, COUNT(*) AS n FROM issues i JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND s.archived = 0 AND i.status IN (${openPlaceholders}) GROUP BY type`)
     .all(...OPEN_ISSUE_STATUSES);
   const issuesByCategory = db
-    .prepare(`SELECT category, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders}) GROUP BY category ORDER BY n DESC`)
+    .prepare(`SELECT category, COUNT(*) AS n FROM issues i JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND s.archived = 0 AND i.status IN (${openPlaceholders}) GROUP BY category ORDER BY n DESC`)
     .all(...OPEN_ISSUE_STATUSES);
 
   const hotSites = db
@@ -51,9 +51,9 @@ metaRouter.get('/stats', (_req, res) => {
              AND status_video = 'live' AND status_display = 'live' AND status_ads_txt = 'live'
              AND status_ad_tag = 'live' AND status_mcm = 'live') AS fully_live,
          (SELECT COUNT(*) FROM sites WHERE archived = 0 AND priority >= 99) AS inactive,
-         (SELECT COUNT(*) FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders})) AS open_issues,
-         (SELECT COUNT(*) FROM issues WHERE deleted_at IS NULL AND status = 'ready_for_qa') AS awaiting_qa,
-         (SELECT COUNT(*) FROM issues WHERE deleted_at IS NULL AND status = 'verified') AS verified`
+         (SELECT COUNT(*) FROM issues i JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND s.archived = 0 AND i.status IN (${openPlaceholders})) AS open_issues,
+         (SELECT COUNT(*) FROM issues i JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND s.archived = 0 AND i.status = 'ready_for_qa') AS awaiting_qa,
+         (SELECT COUNT(*) FROM issues i JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND s.archived = 0 AND i.status = 'verified') AS verified`
     )
     .get(...OPEN_ISSUE_STATUSES);
 
@@ -200,14 +200,31 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
       name: z.string().trim().min(1).max(190),
       role: z.enum(['admin', 'dev', 'partner']),
       company: z.string().trim().max(190),
-      active: z.coerce.boolean(),
-      password: z.string().min(8),
+      // Strict, not coerced: "false" and "off" are truthy strings, so the very
+      // call meant to disable a compromised account used to enable it.
+      active: z.boolean({ invalid_type_error: 'active must be true or false' }),
+      password: z.string().min(8, 'A password must be at least 8 characters'),
     })
     .partial()
+    .strict()
     .safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid user data' });
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid user data' });
+  }
 
   const { password, ...fields } = parsed.data;
+
+  /*
+   * One unconfirmed click on your own row used to lock you out for good,
+   * recoverable only by another admin.
+   */
+  if (id === req.user.id) {
+    if (fields.active === false) return res.status(400).json({ error: 'You cannot disable your own account' });
+    if (fields.role && fields.role !== user.role) {
+      return res.status(400).json({ error: 'You cannot change your own role. Ask another admin.' });
+    }
+  }
+
   if (password) fields.password_hash = hashPassword(password);
   if (fields.active !== undefined) fields.active = fields.active ? 1 : 0;
 
@@ -220,6 +237,10 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
   const entries = Object.entries(fields);
   if (entries.length) {
     db.prepare(`UPDATE users SET ${entries.map(([f]) => `${f} = ?`).join(', ')} WHERE id = ?`).run(...entries.map(([, v]) => v), id);
+  }
+  // A new password or a disabled account must not leave old sessions alive.
+  if (password || fields.active === 0) {
+    db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
   }
   res.json({ user: db.prepare('SELECT id, username, email, name, role, company, active FROM users WHERE id = ?').get(id) });
 });
@@ -244,7 +265,7 @@ metaRouter.get('/export.csv', (_req, res) => {
   );
   const openCounts = new Map(
     db
-      .prepare(`SELECT site_id, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders}) GROUP BY site_id`)
+      .prepare(`SELECT site_id, COUNT(*) AS n FROM issues i JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND s.archived = 0 AND i.status IN (${openPlaceholders}) GROUP BY site_id`)
       .all(...OPEN_ISSUE_STATUSES)
       .map((r) => [r.site_id, r.n])
   );

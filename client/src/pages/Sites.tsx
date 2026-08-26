@@ -385,8 +385,12 @@ export default function Sites() {
           siteIds={[...selected]}
           domains={sites.filter((s) => selected.has(s.id)).map((s) => s.domain)}
           onClose={() => setBulkOpen(false)}
-          onCreated={(count) => {
-            setNotice({ tone: 'green', text: `Issue raised on ${count} site(s)` });
+          onCreated={(count, _issue, uploadErrors) => {
+            setNotice(
+              uploadErrors?.length
+                ? { tone: 'red', text: `Issue raised on ${count} site(s), but a screenshot did not attach: ${uploadErrors[0]}` }
+                : { tone: 'green', text: `Issue raised on ${count} site(s)` }
+            );
             setBulkOpen(false);
             setSelected(new Set());
             api.get<{ sites: Site[] }>(`/sites${showArchived ? '?archived=1' : ''}`).then((r) => setSites(r.sites));

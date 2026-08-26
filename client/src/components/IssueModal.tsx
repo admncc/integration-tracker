@@ -26,7 +26,8 @@ export default function IssueModal({
   /** When given, the dialog lets the reporter pick the affected domains itself. */
   selectableSites?: Site[];
   onClose: () => void;
-  onCreated: (count: number, issue?: Issue) => void;
+  /** `uploadErrors` is non-empty when the issues exist but a screenshot did not attach. */
+  onCreated: (count: number, issue?: Issue, uploadErrors?: string[]) => void;
 }) {
   const [picked, setPicked] = useState<number[]>(preselected);
   const [siteSearch, setSiteSearch] = useState('');
@@ -65,18 +66,33 @@ export default function IssueModal({
       due_date: form.due_date || null,
     };
     try {
+      /*
+       * The issues are created first and the screenshots follow, so an upload
+       * failure must not leave the dialog open over issues that already exist -
+       * pressing Create again then made a second set.
+       */
+      let created: Issue[] = [];
       if (bulk) {
         const result = await api.post<{ created: number; issues: Issue[] }>('/issues/bulk', { ...payload, site_ids: siteIds });
-        // The same screenshot is attached to every issue in the batch.
-        for (const created of result.issues) {
-          for (const file of files) await uploadImage(created.id, file);
-        }
-        onCreated(result.created);
+        created = result.issues;
       } else {
         const result = await api.post<{ issue: Issue }>('/issues', { ...payload, site_id: siteIds[0] });
-        for (const file of files) await uploadImage(result.issue.id, file);
-        onCreated(1, result.issue);
+        created = [result.issue];
       }
+
+      const failed: string[] = [];
+      for (const issue of created) {
+        // The same screenshot is attached to every issue in the batch.
+        for (const file of files) {
+          try {
+            await uploadImage(issue.id, file);
+          } catch (err) {
+            failed.push(`${file.name}: ${err instanceof Error ? err.message : 'upload failed'}`);
+          }
+        }
+      }
+
+      onCreated(created.length, created[0], failed);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not create the issue');
     } finally {

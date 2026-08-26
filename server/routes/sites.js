@@ -54,7 +54,7 @@ function listSites({ includeArchived = false } = {}) {
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status IN (${openList})) AS open_issues,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status = 'ready_for_qa') AS awaiting_qa,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL) AS total_issues,
-              (SELECT COUNT(*) FROM site_messages m WHERE m.site_id = s.id) AS message_count
+              (SELECT COUNT(*) FROM site_messages m WHERE m.site_id = s.id AND m.deleted_at IS NULL) AS message_count
          FROM sites s
         WHERE (? = 1 OR s.archived = 0)
         ORDER BY s.priority ASC, s.domain ASC`
@@ -106,11 +106,13 @@ sitesRouter.post('/:id/messages', (req, res) => {
 
   const parsed = z
     .object({
-      body: z.string().trim().min(1).max(20000),
+      body: z.string().trim().min(1, 'A message cannot be empty').max(20000, 'That message is too long (max 20000 characters)'),
       reply_to_id: z.coerce.number().int().positive().nullable().optional(),
     })
     .safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'A message cannot be empty' });
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'A message cannot be empty' });
+  }
 
   let replyTo = null;
   if (parsed.data.reply_to_id) {
@@ -140,17 +142,47 @@ sitesRouter.delete('/:id/messages/:messageId', (req, res) => {
     return res.status(403).json({ error: 'Only the author or an admin can delete a message' });
   }
 
-  // Tombstone rather than delete, so a reply keeps the question it answers.
-  db.prepare("UPDATE site_messages SET deleted_at = datetime('now'), body = '' WHERE id = ?").run(message.id);
-  res.json({ ok: true });
+  /*
+   * Tombstone, keeping the body: a reply keeps the question it answers, and the
+   * delete stays reversible. What must go is the copy in the audit trail, which
+   * was still printing the text on the History panel and the dashboard feed
+   * after the author had removed it.
+   */
+  db.prepare("UPDATE site_messages SET deleted_at = datetime('now') WHERE id = ?").run(message.id);
+  db.prepare(
+    `UPDATE activity SET new_value = '(message deleted)'
+      WHERE site_id = ? AND kind = 'message_posted' AND new_value = ?`
+  ).run(message.site_id, message.body.slice(0, 120));
+  logActivity({ siteId: message.site_id, actorId: req.user.id, kind: 'message_deleted', newValue: '(message deleted)' });
+
+  res.json({ ok: true, message: listMessages(message.site_id).find((m) => m.id === message.id) });
+});
+
+/** A misfired delete on a discussion has to be undoable, as it is for issues. */
+sitesRouter.post('/:id/messages/:messageId/restore', (req, res) => {
+  const message = db
+    .prepare('SELECT * FROM site_messages WHERE id = ? AND site_id = ?')
+    .get(Number(req.params.messageId), Number(req.params.id));
+  if (!message) return res.status(404).json({ error: 'Message not found' });
+  if (!message.deleted_at) return res.json({ ok: true, message });
+  if (req.user.role !== 'admin' && message.author_id !== req.user.id) {
+    return res.status(403).json({ error: 'Only the author or an admin can restore a message' });
+  }
+
+  db.prepare('UPDATE site_messages SET deleted_at = NULL WHERE id = ?').run(message.id);
+  logActivity({ siteId: message.site_id, actorId: req.user.id, kind: 'message_restored', newValue: message.body.slice(0, 120) });
+
+  res.json({ ok: true, message: listMessages(message.site_id).find((m) => m.id === message.id) });
 });
 
 function listMessages(siteId) {
   return db
     .prepare(
-      `SELECT m.id, m.site_id, m.author_id, m.reply_to_id, m.body, m.created_at, m.deleted_at,
+      `SELECT m.id, m.site_id, m.author_id, m.reply_to_id, m.created_at, m.deleted_at,
+              CASE WHEN m.deleted_at IS NULL THEN m.body ELSE '' END AS body,
               u.name AS author_name, u.role AS author_role,
-              p.body AS reply_to_body, p.deleted_at AS reply_to_deleted_at, pu.name AS reply_to_author
+              CASE WHEN p.deleted_at IS NULL THEN p.body ELSE '' END AS reply_to_body,
+              p.deleted_at AS reply_to_deleted_at, pu.name AS reply_to_author
          FROM site_messages m
          LEFT JOIN users u ON u.id = m.author_id
          LEFT JOIN site_messages p ON p.id = m.reply_to_id
