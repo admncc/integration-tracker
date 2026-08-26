@@ -4,6 +4,7 @@ import { db, getSetting, logActivity, setSetting } from '../lib/db.js';
 import { hashPassword, requireAuth, requireRole } from '../lib/auth.js';
 import { APPROVAL, CMP, DEFAULT_EUR_USD, FX_SETTING_KEY, OPEN_ISSUE_STATUSES, TRACKS, TRACK_STATUS } from '../../shared/domain.js';
 import { FX_KEYS, fxState, refreshRate } from '../lib/fx.js';
+import { DIGEST_KEYS, buildDigest, digestPayload, digestState, isQuiet, sendDigest } from '../lib/digest.js';
 import { csvToSites, toCsv } from '../lib/sheet.js';
 import { importRowSchema } from './sites.js';
 
@@ -54,7 +55,8 @@ metaRouter.get('/stats', (_req, res) => {
          (SELECT COUNT(*) FROM sites WHERE archived = 0 AND priority >= 99) AS inactive,
          (SELECT COUNT(*) FROM issues i LEFT JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL) AND i.status IN (${openPlaceholders})) AS open_issues,
          (SELECT COUNT(*) FROM issues i LEFT JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL) AND i.status = 'ready_for_qa') AS awaiting_qa,
-         (SELECT COUNT(*) FROM issues i LEFT JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL) AND i.status = 'verified') AS verified`
+         (SELECT COUNT(*) FROM issues i LEFT JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL) AND i.status = 'verified') AS verified,
+         (SELECT COUNT(*) FROM issues i LEFT JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL) AND i.status = 'blocked') AS blocked`
     )
     .get(...OPEN_ISSUE_STATUSES);
 
@@ -100,6 +102,16 @@ metaRouter.get('/stats', (_req, res) => {
    * "Dev Team moved In progress on sky-flight.de" - with four open issues on
    * that domain, nobody could tell which one had moved.
    */
+  const blockedIssues = db
+    .prepare(
+      `SELECT i.id, i.title, i.blocked_on, i.blocked_since, s.domain, i.site_id
+         FROM issues i LEFT JOIN sites s ON s.id = i.site_id
+        WHERE i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL) AND i.status = 'blocked'
+        ORDER BY COALESCE(i.blocked_since, i.updated_at) ASC
+        LIMIT 10`
+    )
+    .all();
+
   const recent = db
     .prepare(
       `SELECT ac.*, u.name AS actor_name, s.domain, i.title AS issue_title
@@ -112,13 +124,76 @@ metaRouter.get('/stats', (_req, res) => {
     .all();
 
   res.json({
-    totals, trackBreakdown, issuesByStatus, issuesByType, issuesBySeverity, issuesByCategory, hotSites, recent,
+    totals, trackBreakdown, issuesByStatus, issuesByType, issuesBySeverity, issuesByCategory, hotSites, recent, blockedIssues,
     revenue: { ...revenue, eur_usd: eurUsd, missing: missingRpm, worst: rpmSites.slice(0, 5), best: rpmSites.slice(-5).reverse() },
   });
 });
 
-metaRouter.get('/settings', (_req, res) => {
-  res.json({ settings: fxState() });
+/**
+ * "Is it my turn?" - the question the mail thread answered and the tracker did
+ * not. Every handoff here crosses a company boundary, so without this each side
+ * has to guess, and the guessing goes back into e-mail.
+ *
+ * It is deliberately derived, not stored: no read state to keep in sync, no
+ * notification table to garbage-collect.
+ */
+metaRouter.get('/inbox', (req, res) => {
+  const openPlaceholders = OPEN_ISSUE_STATUSES.map(() => '?').join(',');
+  const live = `i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL)`;
+  const from = `FROM issues i LEFT JOIN sites s ON s.id = i.site_id`;
+  const seen = db.prepare('SELECT inbox_seen_message_id FROM users WHERE id = ?').get(req.user.id)?.inbox_seen_message_id ?? 0;
+
+  const items = [];
+
+  if (req.user.role === 'partner') {
+    // Fixed and handed back: nothing moves until the partner looks.
+    const n = db.prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.status = 'ready_for_qa'`).get().n;
+    if (n) items.push({ key: 'ready_for_qa', n, label: n === 1 ? '1 fix to re-check' : `${n} fixes to re-check`, to: '/issues?status=ready_for_qa' });
+  } else {
+    const mine = db
+      .prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.assignee_id = ? AND i.status IN ('open','in_progress')`)
+      .get(req.user.id).n;
+    if (mine) items.push({ key: 'assigned', n: mine, label: mine === 1 ? '1 issue assigned to you' : `${mine} issues assigned to you`, to: `/issues?status=open&assignee_id=${req.user.id}` });
+
+    const unowned = db
+      .prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.assignee_id IS NULL AND i.status = 'open'`)
+      .get().n;
+    if (unowned) items.push({ key: 'unassigned', n: unowned, label: `${unowned} open, nobody assigned`, to: '/issues?status=open&assignee_id=none' });
+  }
+
+  // Everyone sees what has been said since they last looked here.
+  const messages = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM site_messages m JOIN sites s ON s.id = m.site_id
+        WHERE m.deleted_at IS NULL AND s.archived = 0 AND m.author_id IS NOT ? AND m.id > ?`
+    )
+    .get(req.user.id, seen).n;
+  if (messages) items.push({ key: 'messages', n: messages, label: messages === 1 ? '1 new message' : `${messages} new messages`, to: '/sites' });
+
+  const blocked = db
+    .prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.status = 'blocked'`)
+    .get().n;
+
+  res.json({
+    items,
+    total: items.reduce((sum, item) => sum + item.n, 0),
+    blocked,
+    open: db.prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.status IN (${openPlaceholders})`).get(...OPEN_ISSUE_STATUSES).n,
+  });
+});
+
+/** Clears the "new messages" part of the inbox for this user. */
+metaRouter.post('/inbox/seen', (req, res) => {
+  db.prepare(
+    'UPDATE users SET inbox_seen_message_id = (SELECT COALESCE(MAX(id), 0) FROM site_messages) WHERE id = ?'
+  ).run(req.user.id);
+  res.json({ ok: true });
+});
+
+metaRouter.get('/settings', (req, res) => {
+  // The webhook URL is a credential - it lets anyone holding it post into the
+  // team's channel - so only an admin, who is the only one who can set it, sees it.
+  res.json({ settings: fxState(), digest: req.user.role === 'admin' ? digestState() : null });
 });
 
 metaRouter.patch('/settings', requireRole('admin'), (req, res) => {
@@ -130,6 +205,16 @@ metaRouter.patch('/settings', requireRole('admin'), (req, res) => {
     .object({
       [FX_SETTING_KEY]: z.number({ invalid_type_error: 'The EUR/USD rate must be a number' }).gt(0).lt(100),
       fx_auto: z.boolean({ invalid_type_error: 'The daily-update switch must be true or false' }),
+      digest_webhook_url: z
+        .string()
+        .trim()
+        .max(2000)
+        .refine(
+          (value) => value === '' || /^https:\/\/[^\s]+$/i.test(value),
+          'A webhook URL has to start with https:// - Slack and Teams both give you one'
+        ),
+      digest_hour: z.number({ invalid_type_error: 'The hour must be a number' }).int().min(0).max(23),
+      public_url: z.string().trim().max(500),
     })
     .partial()
     .strict()
@@ -150,7 +235,23 @@ metaRouter.patch('/settings', requireRole('admin'), (req, res) => {
     logActivity({ actorId: req.user.id, kind: 'setting_changed', field: 'fx_auto', newValue: parsed.data.fx_auto ? 'on' : 'off' });
   }
 
-  res.json({ settings: fxState() });
+  if (parsed.data.digest_webhook_url !== undefined) {
+    setSetting(DIGEST_KEYS.url, parsed.data.digest_webhook_url);
+    // The URL itself is never written to the audit trail: it is the credential.
+    logActivity({
+      actorId: req.user.id, kind: 'setting_changed', field: 'digest_webhook_url',
+      newValue: parsed.data.digest_webhook_url ? 'set' : 'cleared',
+    });
+  }
+  if (parsed.data.digest_hour !== undefined) {
+    setSetting(DIGEST_KEYS.hour, parsed.data.digest_hour);
+    logActivity({ actorId: req.user.id, kind: 'setting_changed', field: 'digest_hour', newValue: `${parsed.data.digest_hour}:00` });
+  }
+  if (parsed.data.public_url !== undefined) {
+    setSetting('public_url', parsed.data.public_url.replace(/\/+$/, ''));
+  }
+
+  res.json({ settings: fxState(), digest: digestState() });
 });
 
 /** Pulls today's ECB reference rate on demand. */
@@ -159,6 +260,21 @@ metaRouter.post('/settings/fx/refresh', requireRole('admin'), async (req, res) =
   if (state.error) return res.status(502).json({ error: `Could not reach the ECB: ${state.error}`, settings: state });
   logActivity({ actorId: req.user.id, kind: 'setting_changed', field: 'fx_eur_usd', newValue: `${state[FX_SETTING_KEY]} (ECB)` });
   res.json({ settings: state });
+});
+
+/** Sends the digest now, so an admin can see what it looks like before trusting it. */
+metaRouter.post('/settings/digest/test', requireRole('admin'), async (req, res) => {
+  const result = await sendDigest({ force: true });
+  if (result.skipped) return res.status(400).json({ error: `Nothing was sent: ${result.skipped}`, digest: digestState() });
+  if (!result.ok) return res.status(502).json({ error: result.error, digest: digestState() });
+  logActivity({ actorId: req.user.id, kind: 'setting_changed', field: 'digest_webhook_url', newValue: 'test sent' });
+  res.json({ digest: digestState(), sent: result.digest });
+});
+
+/** What the next digest would say, without sending anything. */
+metaRouter.get('/settings/digest/preview', requireRole('admin'), (_req, res) => {
+  const digest = buildDigest();
+  res.json({ digest, quiet: isQuiet(digest), payload: digestPayload(digest, getSetting('public_url', '')) });
 });
 
 metaRouter.get('/users', (req, res) => {
@@ -191,7 +307,15 @@ metaRouter.post('/users', requireRole('admin'), (req, res) => {
   }
   const id = Number(
     db
-      .prepare('INSERT INTO users (username, email, name, password_hash, role, company) VALUES (?, ?, ?, ?, ?, ?)')
+      /*
+       * A new colleague starts level with the discussion as it stands. Without
+       * the baseline their first sign-in would announce every message ever
+       * written as unread.
+       */
+      .prepare(
+        `INSERT INTO users (username, email, name, password_hash, role, company, inbox_seen_message_id)
+         VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(id), 0) FROM site_messages))`
+      )
       .run(username, email || null, name, hashPassword(password), role, company).lastInsertRowid
   );
   res.status(201).json({ user: { id, username, email, name, role, company, active: 1 } });

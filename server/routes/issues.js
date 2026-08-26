@@ -33,8 +33,10 @@ const statusEnum = z.enum(Object.keys(ISSUE_STATUS));
  */
 const ALLOWED_TRANSITIONS = {
   admin: Object.keys(ISSUE_STATUS),
-  dev: ['open', 'in_progress', 'ready_for_qa', 'wont_fix'],
-  partner: ['open', 'verified', 'wont_fix'],
+  dev: ['open', 'in_progress', 'blocked', 'ready_for_qa', 'wont_fix'],
+  // The partner can park their own finding too - waiting on a contract is not
+  // the publisher's news to break.
+  partner: ['open', 'blocked', 'verified', 'wont_fix'],
 };
 
 /** A non-existent assignee used to reach SQLite and fail as a 500. */
@@ -62,6 +64,9 @@ const baseIssue = {
   category: categoryEnum.default('other'),
   severity: severityEnum.default('medium'),
   assignee_id: z.coerce.number().int().positive().nullable().optional(),
+  // Who or what the work is waiting on. Free text on purpose: it is a contract,
+  // a person at another company, an approval queue - not a value from a list.
+  blocked_on: z.preprocess(cleanText, z.string().trim().max(300, 'Keep "blocked on" under 300 characters')).optional(),
   // A free-text due date rendered as "Due not-a-date" and broke the overdue compare.
   due_date: z
     .string()
@@ -139,6 +144,9 @@ function buildIssueFilter(rawQuery) {
    * all: the list could not be filtered by who raised an issue or when, and it
    * has no date sort, so both questions sent people back to a spreadsheet.
    */
+  // "What are we blocked on?" - across every status, in one place.
+  if (query.blocked === '1') where.push("i.status = 'blocked'");
+
   if (query.reporter_id) {
     where.push('i.reporter_id = ?');
     params.push(query.reporter_id);
@@ -222,7 +230,7 @@ issuesRouter.get('/export.csv', (req, res) => {
     .prepare(
       `SELECT i.id, i.site_id, s.domain, s.priority, s.test_url, i.type, i.category, i.severity, i.status, i.title,
               r.name AS reporter, a.name AS assignee, i.due_date, i.created_at, i.updated_at, i.closed_at,
-              i.deleted_at, d.name AS deleted_by,
+              i.deleted_at, d.name AS deleted_by, i.blocked_on, i.blocked_since,
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comments,
               (SELECT COUNT(*) FROM attachments at WHERE at.issue_id = i.id) AS attachments,
               -- How often this went back for a re-check. It is the answer to
@@ -241,7 +249,7 @@ issuesRouter.get('/export.csv', (req, res) => {
   const header = [
     'ID', 'Domain', 'Prio', 'Test URL', 'Type', 'Category', 'Severity', 'Status', 'Title',
     'Raised by', 'Assignee', 'Due', 'Created', 'Updated', 'Closed', 'Deleted', 'Deleted by',
-    'Comments', 'Attachments', 'QA rounds',
+    'Comments', 'Attachments', 'QA rounds', 'Blocked on', 'Blocked since',
   ];
   const body = rows.map((row) => [
     row.id, row.domain ?? 'All domains (network-wide)', row.site_id == null ? '' : row.priority, row.test_url ?? '',
@@ -251,7 +259,7 @@ issuesRouter.get('/export.csv', (req, res) => {
     ISSUE_STATUS[row.status]?.label ?? row.status,
     row.title, row.reporter ?? '', row.assignee ?? '', row.due_date ?? '',
     row.created_at, String(row.updated_at).slice(0, 19), row.closed_at ?? '', row.deleted_at ?? '', row.deleted_by ?? '',
-    row.comments, row.attachments, row.qa_rounds,
+    row.comments, row.attachments, row.qa_rounds, row.blocked_on ?? '', row.blocked_since ?? '',
   ]);
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
@@ -475,7 +483,9 @@ issuesRouter.patch('/:id', (req, res) => {
   if (data.status && data.status !== issue.status && !ALLOWED_TRANSITIONS[req.user.role].includes(data.status)) {
     return res.status(403).json({ error: `A ${req.user.role} cannot set an issue to "${ISSUE_STATUS[data.status].label}"` });
   }
-  if (req.user.role === 'partner' && Object.keys(data).some((k) => k !== 'status')) {
+  // The partner can park an issue, so they must be able to say what on.
+  const PARTNER_WRITABLE = new Set(['status', 'blocked_on']);
+  if (req.user.role === 'partner' && Object.keys(data).some((k) => !PARTNER_WRITABLE.has(k))) {
     return res.status(403).json({ error: 'The partner side can change the status and add comments, not the issue body' });
   }
 
@@ -483,6 +493,19 @@ issuesRouter.patch('/:id', (req, res) => {
   if (!updates.length) return res.json({ issue });
 
   const extra = [];
+
+  /*
+   * blocked_since is stamped on the way in and left alone afterwards, so
+   * "waiting since when" survives an edit to the reason. Leaving `blocked`
+   * clears it, and the reason is kept - the history should still say what the
+   * hold-up had been.
+   */
+  if (data.status === 'blocked' && issue.status !== 'blocked') {
+    extra.push("blocked_since = datetime('now')");
+  } else if (data.status && data.status !== 'blocked' && issue.status === 'blocked') {
+    extra.push('blocked_since = NULL');
+  }
+
   if (data.status && data.status !== issue.status) {
     /*
      * resolved_at is "when the work stopped", so a terminal status sets it too.

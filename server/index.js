@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path';
 import { db, setSetting } from './lib/db.js';
 import { attachUser } from './lib/auth.js';
 import { startDailyRefresh } from './lib/fx.js';
+import { startDailyDigest } from './lib/digest.js';
 import { authRouter } from './routes/auth.js';
 import { sitesRouter } from './routes/sites.js';
 import { issuesRouter } from './routes/issues.js';
@@ -120,6 +121,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT ?? 4000);
   // Keeps the EUR/USD reference rate current without anyone having to think about it.
   if (process.env.DISABLE_FX_REFRESH !== '1') startDailyRefresh();
+  // No-op until an admin sets a webhook URL in Settings.
+  if (process.env.DISABLE_DIGEST !== '1') startDailyDigest();
 
   app.listen(port, () => {
     console.log(`Integration Tracker API on http://localhost:${port}`);

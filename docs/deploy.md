@@ -135,6 +135,10 @@ Open `https://tracker.example.com`, sign in as `admin` with the password from
    `SEED_PASSWORD`, so leaving one untouched leaves a known password on the box.
 4. Settings → check the EUR/USD rate says "European Central Bank" - that
    confirms the server can reach the outside world.
+5. Settings → Daily digest: paste a Slack or Teams incoming webhook and the
+   tracker's own address, then press "Send one now" to check it arrives. This is
+   what tells both sides it is their turn; without it people fall back to
+   e-mail. Outbound HTTPS to the webhook host has to be open.
 
 Only then send the link to the partner.
 
@@ -247,4 +251,5 @@ the database is on the new schema. Restore the backup as well.
 | The dashboard and the issue list show different counts | They should not any more; both exclude archived domains. Tick "Include archived domains" on the Issues page to see the rest |
 | Sign-in says "too many attempts" for everyone | `TRUST_PROXY=1` missing from `.env` |
 | Sign-in works but every page is empty | old build: the session cookie was dropped over plain HTTP. `git pull` and rebuild |
+| The daily digest never arrives | Settings shows the last attempt and its error. A quiet day sends nothing by design; otherwise it is usually outbound HTTPS being blocked, or a webhook the channel has revoked |
 | Exchange rate stuck at 1.08 | the server cannot reach `ecb.europa.eu`; set the rate by hand under Settings |

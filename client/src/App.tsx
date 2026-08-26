@@ -1,6 +1,7 @@
 import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { useSession } from './lib/session';
 import { Spinner } from './components/ui';
+import Inbox from './components/Inbox';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Sites from './pages/Sites';
@@ -51,6 +52,7 @@ export default function App() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3 text-sm">
+            <Inbox />
             <NavLink to="/account" className="rounded-lg px-2 py-1 text-right leading-tight transition hover:bg-raised">
               <div className="font-medium">{user.name}</div>
               <div className="text-xs text-ink-faint">

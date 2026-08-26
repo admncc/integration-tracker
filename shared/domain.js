@@ -38,16 +38,41 @@ export const APPROVAL = {
 /**
  * QA loop: the partner opens an issue, a dev picks it up and pushes a fix,
  * the partner re-checks. `verified` and `wont_fix` are terminal.
+ *
+ * `blocked` is the one status nobody on either side owns: the work is real, it
+ * is nobody's turn, and it is waiting on a third party. Without it, waiting on
+ * a contract looked exactly like active work, and "what are we blocked on, and
+ * since when" had no answer at all.
  */
 export const ISSUE_STATUS = {
   open:         { label: 'Open',            tone: 'red',    terminal: false },
   in_progress:  { label: 'In progress',     tone: 'amber',  terminal: false },
+  blocked:      { label: 'Blocked',         tone: 'purple', terminal: false },
   ready_for_qa: { label: 'Ready for re-check', tone: 'blue', terminal: false },
   verified:     { label: 'Verified',        tone: 'green',  terminal: true  },
   wont_fix:     { label: "Won't fix",       tone: 'muted',  terminal: true  },
 };
 
 export const OPEN_ISSUE_STATUSES = Object.keys(ISSUE_STATUS).filter((s) => !ISSUE_STATUS[s].terminal);
+
+/** Whole days between a timestamp and now - "blocked for 12 days". */
+export function daysSince(iso, now = Date.now()) {
+  if (!iso) return null;
+  const then = new Date(String(iso).includes('T') ? iso : `${String(iso).replace(' ', 'T')}Z`).getTime();
+  if (!Number.isFinite(then)) return null;
+  return Math.max(0, Math.floor((now - then) / 86400000));
+}
+
+/** "since when", in the words somebody would actually use. */
+export function formatWaiting(iso, now = Date.now()) {
+  const days = daysSince(iso, now);
+  if (days == null) return '';
+  if (days === 0) return 'since today';
+  if (days === 1) return 'since yesterday';
+  if (days < 14) return `for ${days} days`;
+  if (days < 60) return `for ${Math.round(days / 7)} weeks`;
+  return `for ${Math.round(days / 30)} months`;
+}
 
 /**
  * Technical issues are implementation defects; revenue issues are yield problems

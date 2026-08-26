@@ -458,6 +458,13 @@ console.log('Existing rows were left untouched - the seed only ever adds.');
 console.log(`Set Previous Session RPM on ${rpmSet} site(s).`);
 if (rpmMissing.length) console.log(`Not tracked yet, RPM skipped: ${rpmMissing.join(', ')}`);
 console.log(`Database now holds ${counts.sites} sites, ${counts.issues} issues, ${counts.users} users.`);
+/*
+ * The seed writes its discussion messages after db.js has already taken the
+ * "everyone starts level" baseline, so without this every account would meet
+ * the seeded conversation as unread mail on its first sign-in.
+ */
+db.exec('UPDATE users SET inbox_seen_message_id = (SELECT COALESCE(MAX(id), 0) FROM site_messages)');
+
 console.log(`\nSign in with any of these (password: ${DEFAULT_PASSWORD}):`);
 for (const u of USERS) console.log(`  ${u.role.padEnd(8)} ${u.username.padEnd(12)} (${u.name})`);
 console.log('\nChange these passwords before putting the tracker in front of the partner.');

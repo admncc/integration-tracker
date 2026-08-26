@@ -243,6 +243,7 @@ export default function Sites() {
           if (value === 'any') return open > 0;
           if (value === 'none') return open === 0;
           if (value === 'qa') return (site.awaiting_qa ?? 0) > 0;
+          if (value === 'blocked') return (site.blocked_issues ?? 0) > 0;
           return true;
         }
         const cell = site[key as keyof Site];
@@ -586,16 +587,22 @@ function Cell({
   if (column.kind === 'issues') {
     const open = site.open_issues ?? 0;
     const qa = site.awaiting_qa ?? 0;
+    const blocked = site.blocked_issues ?? 0;
+    /*
+     * Three states in one cell, because the column is narrow: how much is open,
+     * a blue dot when the partner owes a re-check, a purple one when something
+     * here is waiting on a third party and nobody on either side can move it.
+     */
+    const parts = [`${open} open issue(s)`];
+    if (qa) parts.push(`${qa} waiting on the partner's re-check`);
+    if (blocked) parts.push(`${blocked} blocked on somebody outside the team`);
     return (
-      <Link
-        to={`/issues?site_id=${site.id}`}
-        className="inline-flex items-center gap-1"
-        title={qa > 0 ? `${open} open, ${qa} waiting on the partner's re-check` : `${open} open issue(s)`}
-      >
+      <Link to={`/issues?site_id=${site.id}`} className="inline-flex items-center gap-1" title={parts.join(', ')}>
         <Badge tone={open === 0 ? 'muted' : open > 2 ? 'red' : 'amber'} className="!px-1.5">
           {open} open
         </Badge>
         {qa > 0 && <span aria-hidden className="size-1.5 rounded-full bg-tone-blue" />}
+        {blocked > 0 && <span aria-hidden className="size-1.5 rounded-full bg-tone-purple" />}
       </Link>
     );
   }
@@ -674,6 +681,7 @@ function ColumnFilter({ column, value, onChange }: { column: Column; value: stri
         <option value="">All</option>
         <option value="any">Has open</option>
         <option value="qa">Awaiting re-check</option>
+        <option value="blocked">Blocked on a third party</option>
         <option value="none">None open</option>
       </select>
     );

@@ -55,8 +55,15 @@ The QA loop is the status flow:
 open → in progress → ready for re-check → verified
          (developer)      (developer)      (partner)
 
+          ↘ blocked (waiting on a third party, not terminal)
           ↘ won't fix (developer or admin, terminal)
 ```
+
+**Blocked** is the state nobody on either side owns: the work is real, it is
+nobody's turn, and it is waiting on something outside both companies - a
+contract, an approval queue, the client's own developer. It records *on whom*
+and *since when*, so "what are we blocked on, and how long has it been" is one
+click on the dashboard rather than a question nobody can answer.
 
 A partner can reopen a verified issue; the card then shows which QA round the
 issue is on, so an item that keeps bouncing back is visible rather than buried
@@ -92,6 +99,25 @@ Both rules are enforced server-side, not just hidden in the interface. A
 developer can close an issue as **won't fix**, which is terminal too; that is
 deliberate, so a finding the publisher disagrees with does not sit open forever,
 and it shows in the history with their name on it.
+
+## Knowing it is your turn
+
+Every handoff here crosses a company boundary, so the tool has to say whose turn
+it is - otherwise the mail thread survives as the notification layer and the
+tracker becomes a record written after the fact.
+
+- **In the header**, a "waiting on you" count: for the partner, fixes to
+  re-check; for a developer, issues assigned to them plus the unowned backlog;
+  for everyone, discussion messages they have not seen.
+- **A daily digest** into Slack or Teams, if an admin sets an incoming webhook
+  under Settings: what was raised, handed back and verified in the last 24
+  hours, what is waiting on whom, and what is blocked. A quiet day sends
+  nothing. There is a preview and a "send one now" button, so you can see what
+  it says before trusting it.
+
+Per-user e-mail is deliberately not built: it needs SMTP, an address list
+(`users.email` is optional), unsubscribe handling and per-event preferences, for
+less benefit than one webhook into the channel people already watch.
 
 ## Running it
 

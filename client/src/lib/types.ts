@@ -13,7 +13,7 @@ export interface User {
 export type TrackStatus = 'live' | 'qa' | 'tag_impl' | 'tag_prep' | 'pending' | 'na';
 export type CmpValue = 'none' | 'old' | 'new';
 export type ApprovalValue = 'none' | 'sent' | 'approved' | 'rejected';
-export type IssueStatus = 'open' | 'in_progress' | 'ready_for_qa' | 'verified' | 'wont_fix';
+export type IssueStatus = 'open' | 'in_progress' | 'blocked' | 'ready_for_qa' | 'verified' | 'wont_fix';
 export type Severity = 'blocker' | 'high' | 'medium' | 'low';
 export type IssueType = 'technical' | 'revenue';
 export type Currency = 'EUR' | 'USD';
@@ -41,6 +41,7 @@ export interface Site {
   updated_at: string;
   open_issues?: number;
   awaiting_qa?: number;
+  blocked_issues?: number;
   total_issues?: number;
   message_count?: number;
 }
@@ -89,6 +90,24 @@ export interface Issue {
   deleted_at: string | null;
   deleted_by: number | null;
   deleted_by_name?: string | null;
+  /** Only meaningful while status is `blocked`: who the work waits on. */
+  blocked_on?: string;
+  blocked_since?: string | null;
+}
+
+/** One line of "it is your turn", derived server-side from the current state. */
+export interface InboxItem {
+  key: string;
+  n: number;
+  label: string;
+  to: string;
+}
+
+export interface Inbox {
+  items: InboxItem[];
+  total: number;
+  blocked: number;
+  open: number;
 }
 
 export interface Comment {
@@ -116,7 +135,7 @@ export interface ActivityEntry {
 }
 
 export interface Stats {
-  totals: { sites: number; fully_live: number; inactive: number; open_issues: number; awaiting_qa: number; verified: number };
+  totals: { sites: number; fully_live: number; inactive: number; open_issues: number; awaiting_qa: number; verified: number; blocked: number };
   trackBreakdown: Record<string, { label: string; counts: { status: TrackStatus; n: number }[] }>;
   issuesByStatus: { status: IssueStatus; n: number }[];
   issuesByType: { type: IssueType; n: number }[];
@@ -135,6 +154,7 @@ export interface Stats {
     best: RpmRow[];
   };
   recent: ActivityEntry[];
+  blockedIssues: { id: number; title: string; blocked_on: string; blocked_since: string | null; domain: string | null; site_id: number | null }[];
 }
 
 export interface Attachment {

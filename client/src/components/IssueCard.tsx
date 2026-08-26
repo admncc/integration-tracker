@@ -3,15 +3,15 @@ import { Link } from 'react-router-dom';
 import { ApiError, api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Attachment, Comment, Issue, IssueStatus, User } from '../lib/types';
-import { ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY } from '@shared/domain.js';
+import { ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY, formatWaiting } from '@shared/domain.js';
 import { FILE_GLYPH, MAX_UPLOAD_BYTES, fileKind, formatBytes, isInlineType } from '@shared/files.js';
 import { Badge, Button, InlineSelect, Timestamp, localDate, relativeTime, type Tone } from './ui';
 
 /** Mirrors the server-side transition table so the UI never offers a rejected move. */
 const ALLOWED_TRANSITIONS: Record<string, IssueStatus[]> = {
   admin: Object.keys(ISSUE_STATUS) as IssueStatus[],
-  dev: ['open', 'in_progress', 'ready_for_qa', 'wont_fix'],
-  partner: ['open', 'verified', 'wont_fix'],
+  dev: ['open', 'in_progress', 'blocked', 'ready_for_qa', 'wont_fix'],
+  partner: ['open', 'blocked', 'verified', 'wont_fix'],
 };
 
 /** The single obvious next step per role, surfaced as a button next to the dropdown. */
@@ -19,8 +19,10 @@ function primaryAction(status: IssueStatus, role: string): { next: IssueStatus; 
   if (role === 'partner') {
     if (status === 'ready_for_qa') return { next: 'verified', label: 'Verified - close it' };
     if (status === 'verified') return { next: 'open', label: 'Reopen' };
+    if (status === 'blocked') return { next: 'open', label: 'Unblocked - back to open' };
     return null;
   }
+  if (status === 'blocked') return { next: 'in_progress', label: 'Unblocked - pick it back up' };
   if (status === 'open') return { next: 'in_progress', label: 'Start working' };
   if (status === 'in_progress') return { next: 'ready_for_qa', label: 'Fixed - ask for re-check' };
   if (status === 'ready_for_qa' && role === 'admin') return { next: 'verified', label: 'Verify' };
@@ -178,6 +180,13 @@ export default function IssueCard({
             {issue.title}
           </button>
 
+          {issue.status === 'blocked' && (
+            <p className="mt-1 text-xs text-tone-purple">
+              Blocked on <span className="font-medium">{issue.blocked_on || 'someone outside the team'}</span>
+              {issue.blocked_since && ` ${formatWaiting(issue.blocked_since)}`}
+            </p>
+          )}
+
           {/*
             * The page the defect is on, one click from the issue. Without it
             * every QA check and every fix cost three navigations - domain link,
@@ -313,6 +322,31 @@ export default function IssueCard({
                 value={issue.due_date ?? ''}
                 onChange={(event) => update({ due_date: event.target.value || null })}
               />
+            </div>
+          )}
+
+          {issue.status === 'blocked' && (
+            <div className="rounded-lg border border-tone-purple/30 bg-tone-purple-bg/40 px-3 py-2">
+              <label className="block text-xs">
+                <span className="text-ink-soft">Waiting on</span>
+                <input
+                  className="field mt-1 text-sm"
+                  placeholder="TheMoneytizer contract, Google MCM approval, the client's own dev..."
+                  defaultValue={issue.blocked_on ?? ''}
+                  key={issue.blocked_on}
+                  onBlur={(event) => {
+                    if (event.target.value.trim() !== (issue.blocked_on ?? '')) update({ blocked_on: event.target.value.trim() });
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') event.currentTarget.blur();
+                  }}
+                />
+              </label>
+              {issue.blocked_since && (
+                <p className="mt-1.5 text-xs text-ink-faint">
+                  Blocked {formatWaiting(issue.blocked_since)} - since <Timestamp iso={issue.blocked_since} />
+                </p>
+              )}
             </div>
           )}
 

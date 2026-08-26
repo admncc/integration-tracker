@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { ActivityEntry, RpmRow, Stats } from '../lib/types';
-import { BASE_CURRENCY, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY, TRACK_STATUS, formatMoney, formatUplift } from '@shared/domain.js';
+import { BASE_CURRENCY, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY, TRACK_STATUS, daysSince, formatMoney, formatUplift, formatWaiting } from '@shared/domain.js';
 import { Badge, Empty, Spinner, TONE_BG, TONE_TEXT, Timestamp, type Tone } from '../components/ui';
 
 export default function Dashboard() {
@@ -24,6 +24,7 @@ export default function Dashboard() {
     { label: 'Not active (prio 99)', value: totals.inactive, to: '/sites', tone: 'muted' as Tone },
     { label: 'Open issues', value: totals.open_issues, to: '/issues?status=open', tone: totals.open_issues > 0 ? ('red' as Tone) : ('green' as Tone) },
     { label: 'Waiting on partner re-check', value: totals.awaiting_qa, to: '/issues?status=ready_for_qa', tone: 'blue' as Tone },
+    { label: 'Blocked on someone else', value: totals.blocked ?? 0, to: '/issues?status=blocked', tone: totals.blocked ? ('purple' as Tone) : ('muted' as Tone) },
     { label: 'Verified fixes', value: totals.verified, to: '/issues?status=verified', tone: 'green' as Tone },
   ];
 
@@ -34,7 +35,7 @@ export default function Dashboard() {
         <p className="text-sm text-ink-soft">Where every site stands, and what is blocking the ones that are not live yet.</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
         {cards.map((card) => (
           <Link key={card.label} to={card.to} className="card p-4 transition hover:border-line-strong">
             <div className={`text-2xl font-semibold tabular-nums ${card.tone ? TONE_TEXT[card.tone] : ''}`}>{card.value}</div>
@@ -136,6 +137,37 @@ export default function Dashboard() {
             </>
           )}
         </section>
+
+        {stats.blockedIssues?.length > 0 && (
+          <section className="card p-4 lg:col-span-2">
+            <div className="mb-3 flex flex-wrap items-baseline gap-2">
+              <h2 className="text-sm font-semibold">Blocked, and on whom</h2>
+              <span className="text-xs text-ink-faint">
+                Nobody here can move these. Longest wait first.
+              </span>
+            </div>
+            <ul className="space-y-1.5">
+              {stats.blockedIssues.map((entry) => (
+                <li key={entry.id} className="flex flex-wrap items-center gap-2 text-sm">
+                  <Link to={`/issues/${entry.id}`} className="min-w-0 flex-1 truncate font-medium hover:text-brand hover:underline">
+                    {entry.title}
+                  </Link>
+                  {entry.domain && (
+                    <Link to={`/sites/${entry.site_id}`} className="shrink-0 text-xs text-ink-soft hover:text-brand hover:underline">
+                      {entry.domain}
+                    </Link>
+                  )}
+                  <span className="shrink-0 text-xs text-ink-faint">
+                    on <span className="text-ink-soft">{entry.blocked_on || 'someone outside the team'}</span>
+                  </span>
+                  <Badge tone={(daysSince(entry.blocked_since) ?? 0) > 21 ? 'red' : 'purple'}>
+                    {formatWaiting(entry.blocked_since) || 'just now'}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
 
         <section className="card p-4">
           <h2 className="mb-3 text-sm font-semibold">Sites needing the most work</h2>

@@ -139,6 +139,8 @@ export default function Settings() {
         <ImportPanel />
       </div>
 
+      <DigestPanel />
+
       <section className="card p-4">
         <h2 className="text-sm font-semibold">Roles</h2>
         <dl className="mt-2 space-y-2 text-sm">
@@ -427,6 +429,156 @@ function ImportPanel() {
           <p className="text-ink-soft">{result.updated.length} updated</p>
           {result.skipped.length > 0 && <p className="text-tone-amber">{result.skipped.length} row(s) skipped - no usable domain</p>}
         </div>
+      )}
+    </section>
+  );
+}
+
+interface DigestSettings {
+  url: string;
+  hour: number;
+  public_url: string;
+  last_sent_at: string | null;
+  last_error: string | null;
+  last_status: string | null;
+}
+
+interface DigestPreview {
+  quiet: boolean;
+  payload: { text: string };
+}
+
+/**
+ * A daily summary posted into Slack or Teams.
+ *
+ * Without something that reaches people where they already are, each side has
+ * to remember to open the tracker to find out it is their turn - and the mail
+ * thread survives as the notification layer, which is what this tool exists to
+ * replace. One webhook needs no SMTP, no address list and no per-person
+ * settings.
+ */
+function DigestPanel() {
+  const [digest, setDigest] = useState<DigestSettings | null>(null);
+  const [preview, setPreview] = useState<DigestPreview | null>(null);
+  const [url, setUrl] = useState('');
+  const [hour, setHour] = useState('8');
+  const [publicUrl, setPublicUrl] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ tone: 'red' | 'green'; text: string } | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ digest: DigestSettings | null }>('/settings')
+      .then((r) => {
+        if (!r.digest) return;
+        setDigest(r.digest);
+        setUrl(r.digest.url);
+        setHour(String(r.digest.hour));
+        setPublicUrl(r.digest.public_url);
+      })
+      .catch(() => {});
+    api.get<DigestPreview>('/settings/digest/preview').then(setPreview).catch(() => {});
+  }, []);
+
+  async function save() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const body = { digest_webhook_url: url.trim(), digest_hour: Number(hour), public_url: publicUrl.trim() };
+      const r = await api.patch<{ digest: DigestSettings }>('/settings', body);
+      setDigest(r.digest);
+      setNotice({ tone: 'green', text: url.trim() ? 'Saved. The next digest goes out at the hour you chose.' : 'Saved. The daily digest is off.' });
+    } catch (err) {
+      setNotice({ tone: 'red', text: err instanceof Error ? err.message : 'Could not save' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function sendNow() {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await api.post<{ digest: DigestSettings }>('/settings/digest/test');
+      setDigest(r.digest);
+      setNotice({ tone: 'green', text: 'Sent. Check the channel.' });
+    } catch (err) {
+      setNotice({ tone: 'red', text: err instanceof Error ? err.message : 'Could not send' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!digest) return null;
+
+  return (
+    <section className="card p-4">
+      <h2 className="text-sm font-semibold">Daily digest</h2>
+      <p className="mt-1 mb-3 max-w-3xl text-sm text-ink-soft">
+        Posts one summary a day into a Slack or Teams channel: what was raised, handed back and verified, what is waiting
+        on whom, and what is blocked. A quiet day sends nothing. Leave the URL empty to switch it off.
+      </p>
+
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto_1fr]">
+        <Field label="Incoming webhook URL" hint="Slack: Apps → Incoming Webhooks. Teams: channel → Connectors → Incoming Webhook.">
+          <input
+            className="field"
+            type="url"
+            placeholder="https://hooks.slack.com/services/..."
+            value={url}
+            onChange={(event) => setUrl(event.target.value)}
+          />
+        </Field>
+        <Field label="Send at">
+          <select className="field !w-auto" value={hour} onChange={(event) => setHour(event.target.value)}>
+            {Array.from({ length: 24 }, (_, h) => (
+              <option key={h} value={h}>
+                {String(h).padStart(2, '0')}:00
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Tracker address" hint="Optional. Makes the counts in the message clickable.">
+          <input
+            className="field"
+            type="url"
+            placeholder="https://tracker.example.com"
+            value={publicUrl}
+            onChange={(event) => setPublicUrl(event.target.value)}
+          />
+        </Field>
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button variant="primary" onClick={save} disabled={busy}>
+          {busy ? 'Saving...' : 'Save'}
+        </Button>
+        <Button onClick={sendNow} disabled={busy || !digest.url}>
+          Send one now
+        </Button>
+        {digest.last_sent_at && (
+          <span className="text-xs text-ink-faint">
+            Last attempt {formatDateTime(digest.last_sent_at)} - {digest.last_status ?? 'unknown'}
+          </span>
+        )}
+      </div>
+
+      {digest.last_error && <p className="mt-2 text-xs text-tone-red">Last error: {digest.last_error}</p>}
+      {notice && (
+        <p className={`mt-2 rounded-lg px-3 py-2 text-sm ${notice.tone === 'red' ? 'bg-tone-red-bg text-tone-red' : 'bg-tone-green-bg text-tone-green'}`}>
+          {notice.text}
+        </p>
+      )}
+
+      {preview && (
+        <details className="mt-3">
+          <summary className="cursor-pointer text-xs text-ink-soft hover:text-ink">
+            What today's message would say{preview.quiet ? ' (a quiet day - nothing would be sent)' : ''}
+          </summary>
+          <pre className="mt-2 overflow-x-auto rounded-lg bg-raised p-3 text-xs whitespace-pre-wrap text-ink-soft">
+            {preview.payload.text}
+          </pre>
+        </details>
       )}
     </section>
   );

@@ -28,6 +28,11 @@ CREATE TABLE IF NOT EXISTS users (
   role          TEXT NOT NULL CHECK (role IN ('admin','dev','partner')),
   company       TEXT NOT NULL DEFAULT '',
   active        INTEGER NOT NULL DEFAULT 1,
+  -- The newest discussion message this person has seen. An id, not a
+  -- timestamp: both were written to the second, so a message posted in the
+  -- same second as the "seen" mark was counted as already read and never
+  -- shown to anyone.
+  inbox_seen_message_id INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -99,7 +104,11 @@ CREATE TABLE IF NOT EXISTS issues (
   resolved_at  TEXT,
   closed_at    TEXT,
   deleted_at   TEXT,
-  deleted_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+  deleted_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  -- Only meaningful while status = 'blocked': who the work waits on, and since
+  -- when. Kept after the block clears, so the history still shows what happened.
+  blocked_on   TEXT NOT NULL DEFAULT '',
+  blocked_since TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_issues_site ON issues(site_id);
 CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
@@ -164,6 +173,11 @@ CREATE INDEX IF NOT EXISTS idx_activity_issue ON activity(issue_id, id DESC);
 const LATE_COLUMNS = [
   ['issues', 'batch_id', 'INTEGER REFERENCES batches(id) ON DELETE SET NULL'],
   ['site_messages', 'reply_to_id', 'INTEGER REFERENCES site_messages(id) ON DELETE SET NULL'],
+  // Who the work is waiting on, and since when.
+  ['issues', 'blocked_on', "TEXT NOT NULL DEFAULT ''"],
+  ['issues', 'blocked_since', 'TEXT'],
+  // The newest discussion message this person has seen.
+  ['users', 'inbox_seen_message_id', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 for (const [table, column, definition] of LATE_COLUMNS) {
@@ -226,8 +240,10 @@ if (siteIdRequired) {
   const columns = [
     'id', 'site_id', 'batch_id', 'title', 'description', 'type', 'category', 'severity', 'status',
     'reporter_id', 'assignee_id', 'due_date', 'created_at', 'updated_at', 'resolved_at', 'closed_at',
-    'deleted_at', 'deleted_by',
-  ].join(', ');
+    'deleted_at', 'deleted_by', 'blocked_on', 'blocked_since',
+  ]
+    .filter((column) => db.prepare('PRAGMA table_info(issues)').all().some((c) => c.name === column))
+    .join(', ');
 
   db.exec('PRAGMA foreign_keys = OFF');
   db.exec(`
@@ -250,7 +266,9 @@ if (siteIdRequired) {
       resolved_at  TEXT,
       closed_at    TEXT,
       deleted_at   TEXT,
-      deleted_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+      deleted_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      blocked_on   TEXT NOT NULL DEFAULT '',
+      blocked_since TEXT
     );
     INSERT INTO issues_rebuilt (${columns}) SELECT ${columns} FROM issues;
     DROP TABLE issues;
@@ -321,6 +339,15 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_issues_batch ON issues(batch_id)');
  * currency was a real choice.
  */
 db.prepare("UPDATE sites SET rpm_primis_currency = 'EUR' WHERE rpm_primis IS NULL AND rpm_primis_currency = 'USD'").run();
+
+/*
+ * Nobody should meet the whole discussion history as unread on the day this
+ * ships, so everyone starts level with what is already there.
+ */
+if (!getSetting('inbox_baseline_set')) {
+  db.exec('UPDATE users SET inbox_seen_message_id = (SELECT COALESCE(MAX(id), 0) FROM site_messages)');
+  setSetting('inbox_baseline_set', '1');
+}
 
 /*
  * The per-site notes field became a discussion thread. Anything already written
