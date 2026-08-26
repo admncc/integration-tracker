@@ -8,7 +8,15 @@ import IssueCard from '../components/IssueCard';
 import IssueModal from '../components/IssueModal';
 
 const FILTERS = [
-  { key: 'status', label: 'Status', options: [['open', 'All open'], ...Object.entries(ISSUE_STATUS).map(([v, m]) => [v, m.label] as [string, string])] },
+  {
+    key: 'status',
+    label: 'Status',
+    options: [
+      ['open', 'All open'],
+      ...Object.entries(ISSUE_STATUS).map(([v, m]) => [v, m.label] as [string, string]),
+      ['deleted', 'Deleted'],
+    ],
+  },
   { key: 'type', label: 'Type', options: Object.entries(ISSUE_TYPE).map(([v, m]) => [v, m.label] as [string, string]) },
   { key: 'severity', label: 'Severity', options: Object.entries(SEVERITY).map(([v, m]) => [v, m.label] as [string, string]) },
   { key: 'category', label: 'Category', options: Object.entries(ISSUE_CATEGORY) as [string, string][] },

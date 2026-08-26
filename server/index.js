@@ -37,8 +37,23 @@ if (existsSync(clientDist)) {
 }
 
 app.use((err, _req, res, _next) => {
-  console.error(err);
-  res.status(500).json({ error: 'Something went wrong on the server' });
+  // body-parser tags its failures with a status; passing those through as 500
+  // told the caller the server broke when the request was simply malformed.
+  const status = Number(err.status ?? err.statusCode) || 500;
+
+  if (status >= 500) {
+    console.error(err);
+    return res.status(500).json({ error: 'Something went wrong on the server' });
+  }
+
+  const message =
+    err.type === 'entity.parse.failed'
+      ? 'The request body is not valid JSON'
+      : err.type === 'entity.too.large'
+        ? 'The request body is too large'
+        : err.message || 'Bad request';
+
+  res.status(status).json({ error: message });
 });
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

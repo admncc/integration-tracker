@@ -22,21 +22,21 @@ metaRouter.get('/stats', (_req, res) => {
     ])
   );
 
-  const issuesByStatus = db.prepare('SELECT status, COUNT(*) AS n FROM issues GROUP BY status').all();
+  const issuesByStatus = db.prepare('SELECT status, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL GROUP BY status').all();
   const issuesBySeverity = db
-    .prepare(`SELECT severity, COUNT(*) AS n FROM issues WHERE status IN (${openPlaceholders}) GROUP BY severity`)
+    .prepare(`SELECT severity, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders}) GROUP BY severity`)
     .all(...OPEN_ISSUE_STATUSES);
   const issuesByType = db
-    .prepare(`SELECT type, COUNT(*) AS n FROM issues WHERE status IN (${openPlaceholders}) GROUP BY type`)
+    .prepare(`SELECT type, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders}) GROUP BY type`)
     .all(...OPEN_ISSUE_STATUSES);
   const issuesByCategory = db
-    .prepare(`SELECT category, COUNT(*) AS n FROM issues WHERE status IN (${openPlaceholders}) GROUP BY category ORDER BY n DESC`)
+    .prepare(`SELECT category, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders}) GROUP BY category ORDER BY n DESC`)
     .all(...OPEN_ISSUE_STATUSES);
 
   const hotSites = db
     .prepare(
       `SELECT s.id, s.domain, s.priority, COUNT(i.id) AS open_issues
-         FROM sites s JOIN issues i ON i.site_id = s.id AND i.status IN (${openPlaceholders})
+         FROM sites s JOIN issues i ON i.site_id = s.id AND i.deleted_at IS NULL AND i.status IN (${openPlaceholders})
         WHERE s.archived = 0
         GROUP BY s.id ORDER BY open_issues DESC, s.priority ASC LIMIT 10`
     )
@@ -51,9 +51,9 @@ metaRouter.get('/stats', (_req, res) => {
              AND status_video = 'live' AND status_display = 'live' AND status_ads_txt = 'live'
              AND status_ad_tag = 'live' AND status_mcm = 'live') AS fully_live,
          (SELECT COUNT(*) FROM sites WHERE archived = 0 AND priority >= 99) AS inactive,
-         (SELECT COUNT(*) FROM issues WHERE status IN (${openPlaceholders})) AS open_issues,
-         (SELECT COUNT(*) FROM issues WHERE status = 'ready_for_qa') AS awaiting_qa,
-         (SELECT COUNT(*) FROM issues WHERE status = 'verified') AS verified`
+         (SELECT COUNT(*) FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders})) AS open_issues,
+         (SELECT COUNT(*) FROM issues WHERE deleted_at IS NULL AND status = 'ready_for_qa') AS awaiting_qa,
+         (SELECT COUNT(*) FROM issues WHERE deleted_at IS NULL AND status = 'verified') AS verified`
     )
     .get(...OPEN_ISSUE_STATUSES);
 
@@ -237,7 +237,7 @@ metaRouter.get('/export.csv', (_req, res) => {
   );
   const openCounts = new Map(
     db
-      .prepare(`SELECT site_id, COUNT(*) AS n FROM issues WHERE status IN (${openPlaceholders}) GROUP BY site_id`)
+      .prepare(`SELECT site_id, COUNT(*) AS n FROM issues WHERE deleted_at IS NULL AND status IN (${openPlaceholders}) GROUP BY site_id`)
       .all(...OPEN_ISSUE_STATUSES)
       .map((r) => [r.site_id, r.n])
   );

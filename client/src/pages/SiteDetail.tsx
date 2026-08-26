@@ -15,7 +15,7 @@ const APPROVAL_OPTIONS = Object.entries(APPROVAL).map(([value, meta]) => ({ valu
 const PARTNER_WRITABLE = new Set(['approval', 'rpm_primis', 'rpm_primis_currency', 'notes']);
 const CURRENCY_OPTIONS = CURRENCIES.map((value: string) => ({ value, label: value }));
 
-type IssueFilter = 'open' | 'all' | 'verified';
+type IssueFilter = 'open' | 'all' | 'verified' | 'deleted';
 
 export default function SiteDetail() {
   const { id } = useParams();
@@ -73,13 +73,17 @@ export default function SiteDetail() {
   }
 
   const shown = useMemo(() => {
-    if (filter === 'all') return issues;
-    if (filter === 'verified') return issues.filter((i) => i.status === 'verified' || i.status === 'wont_fix');
-    return issues.filter((i) => !ISSUE_STATUS[i.status].terminal);
+    if (filter === 'deleted') return issues.filter((i) => i.deleted_at);
+    const live = issues.filter((i) => !i.deleted_at);
+    if (filter === 'all') return live;
+    if (filter === 'verified') return live.filter((i) => i.status === 'verified' || i.status === 'wont_fix');
+    return live.filter((i) => !ISSUE_STATUS[i.status].terminal);
   }, [issues, filter]);
 
-  const openCount = issues.filter((i) => !ISSUE_STATUS[i.status].terminal).length;
-  const doneCount = issues.length - openCount;
+  const live = issues.filter((i) => !i.deleted_at);
+  const openCount = live.filter((i) => !ISSUE_STATUS[i.status].terminal).length;
+  const doneCount = live.length - openCount;
+  const deletedCount = issues.length - live.length;
 
   if (loading) return <Spinner />;
   if (!site) return <Empty>{error || 'Site not found.'}</Empty>;
@@ -225,16 +229,25 @@ export default function SiteDetail() {
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-sm font-semibold">Issues</h2>
               <div className="ml-auto flex gap-1 rounded-lg border border-line p-0.5 text-xs">
-                {(['open', 'verified', 'all'] as IssueFilter[]).map((value) => (
-                  <button
-                    key={value}
-                    onClick={() => setFilter(value)}
-                    className={`rounded-md px-2 py-1 capitalize ${filter === value ? 'bg-brand-soft text-brand-ink' : 'text-ink-soft hover:bg-raised'}`}
-                  >
-                    {value === 'verified' ? 'Closed' : value} (
-                    {value === 'open' ? openCount : value === 'verified' ? doneCount : issues.length})
-                  </button>
-                ))}
+                {(['open', 'verified', 'all', 'deleted'] as IssueFilter[])
+                  .filter((value) => value !== 'deleted' || deletedCount > 0)
+                  .map((value) => (
+                    <button
+                      key={value}
+                      onClick={() => setFilter(value)}
+                      className={`rounded-md px-2 py-1 capitalize ${filter === value ? 'bg-brand-soft text-brand-ink' : 'text-ink-soft hover:bg-raised'}`}
+                    >
+                      {value === 'verified' ? 'Closed' : value} (
+                      {value === 'open'
+                        ? openCount
+                        : value === 'verified'
+                          ? doneCount
+                          : value === 'deleted'
+                            ? deletedCount
+                            : live.length}
+                      )
+                    </button>
+                  ))}
               </div>
             </div>
 
@@ -250,7 +263,11 @@ export default function SiteDetail() {
             {shown.length === 0 && (
               <div className="card">
                 <Empty>
-                  {filter === 'open' ? 'No open issues on this site - everything is ticked off.' : 'Nothing here yet.'}
+                  {filter === 'open'
+                    ? 'No open issues on this site - everything is ticked off.'
+                    : filter === 'deleted'
+                      ? 'Nothing deleted on this site.'
+                      : 'Nothing here yet.'}
                 </Empty>
               </div>
             )}
@@ -284,8 +301,8 @@ export default function SiteDetail() {
         <section className="rounded-xl border border-tone-red/30 bg-tone-red-bg/30 p-4">
           <h2 className="text-sm font-semibold text-tone-red">Remove this site</h2>
           <p className="mt-1 mb-3 max-w-2xl text-sm text-ink-soft">
-            Deleting {site.domain} also removes its {issues.length} issue(s), every comment, every screenshot and the whole
-            discussion. Archiving keeps the record and takes the domain out of the list instead.
+            Deleting {site.domain} also removes its {issues.length} issue(s) including deleted ones, every comment, every
+            screenshot and the whole discussion. Archiving keeps the record and takes the domain out of the list instead.
           </p>
           <Button variant="danger" onClick={() => setConfirmRemove(true)}>
             Remove {site.domain}
@@ -457,15 +474,19 @@ function MoneyField({
     <div>
       <span className="text-xs text-ink-faint">{label}</span>
       <div className="mt-0.5 flex items-center gap-1.5">
-        <InlineText value={amount == null ? '' : String(amount)} type="number" disabled={disabled} onCommit={onAmount} />
-        <InlineSelect
-          value={currency}
-          options={CURRENCY_OPTIONS}
-          tone="slate"
-          disabled={disabled}
-          title={`Currency for ${label}`}
-          onChange={onCurrency}
-        />
+        <div className="min-w-0 flex-1">
+          <InlineText value={amount == null ? '' : String(amount)} type="number" disabled={disabled} onCommit={onAmount} />
+        </div>
+        <div className="shrink-0">
+          <InlineSelect
+            value={currency}
+            options={CURRENCY_OPTIONS}
+            tone="slate"
+            disabled={disabled}
+            title={`Currency for ${label}`}
+            onChange={onCurrency}
+          />
+        </div>
       </div>
     </div>
   );
@@ -510,6 +531,10 @@ function describe(entry: ActivityEntry) {
       return <>raised "{entry.new_value}"</>;
     case 'attachment_added':
       return <>attached {entry.new_value}</>;
+    case 'issue_deleted':
+      return <>deleted the issue "{entry.new_value}"</>;
+    case 'issue_restored':
+      return <>restored the issue "{entry.new_value}"</>;
     case 'message_posted':
       return <>wrote in the discussion: "{entry.new_value}"</>;
     case 'issue_status':

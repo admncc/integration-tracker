@@ -45,6 +45,7 @@ export default function IssueCard({
   const [detail, setDetail] = useState<{ comments: Comment[]; attachments: Attachment[] } | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   useEffect(() => setIssue(initial), [initial]);
 
@@ -57,6 +58,31 @@ export default function IssueCard({
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, [open, detail, issue.id]);
+
+  async function remove() {
+    setError('');
+    try {
+      const { issue: saved } = await api.del<{ issue: Issue }>(`/issues/${issue.id}`);
+      const merged = { ...issue, ...saved };
+      setIssue(merged);
+      setConfirmDelete(false);
+      onChanged?.(merged);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete the issue');
+    }
+  }
+
+  async function restore() {
+    setError('');
+    try {
+      const { issue: saved } = await api.post<{ issue: Issue }>(`/issues/${issue.id}/restore`);
+      const merged = { ...issue, ...saved };
+      setIssue(merged);
+      onChanged?.(merged);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not restore the issue');
+    }
+  }
 
   async function update(patch: Partial<Issue>) {
     setError('');
@@ -79,8 +105,14 @@ export default function IssueCard({
     .map((value) => ({ value, label: ISSUE_STATUS[value].label }));
   const issueAttachments = detail?.attachments.filter((a) => a.comment_id == null) ?? [];
 
+  const deleted = Boolean(issue.deleted_at);
+  const canDelete = user?.role === 'admin' || issue.reporter_id === user?.id;
+  const canRestore = canDelete || issue.deleted_by === user?.id;
+
   return (
-    <div className={`card overflow-hidden ${issue.status === 'open' ? 'border-l-2 border-l-tone-red' : ''}`}>
+    <div
+      className={`card overflow-hidden ${deleted ? 'opacity-70' : issue.status === 'open' ? 'border-l-2 border-l-tone-red' : ''}`}
+    >
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2 px-4 py-3">
         <button onClick={() => setOpen(!open)} className="mt-0.5 shrink-0 text-ink-faint hover:text-ink" aria-label={open ? 'Collapse' : 'Expand'}>
           {open ? '▾' : '▸'}
@@ -88,6 +120,7 @@ export default function IssueCard({
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
+            {deleted && <Badge tone="muted">Deleted</Badge>}
             <Badge tone={status.tone}>{status.label}</Badge>
             <Badge tone={type.tone}>{type.label}</Badge>
             <Badge tone={severity.tone}>{severity.label}</Badge>
@@ -103,7 +136,10 @@ export default function IssueCard({
             )}
           </div>
 
-          <button onClick={() => setOpen(!open)} className="mt-1 block text-left text-sm font-medium hover:text-brand">
+          <button
+            onClick={() => setOpen(!open)}
+            className={`mt-1 block text-left text-sm font-medium hover:text-brand ${deleted ? 'line-through decoration-1' : ''}`}
+          >
             {issue.title}
           </button>
 
@@ -125,22 +161,38 @@ export default function IssueCard({
               </span>
             )}
             {(issue.comment_count ?? 0) > 0 && !open && <span>💬 {issue.comment_count}</span>}
-            <span>Updated {relativeTime(issue.updated_at)}</span>
+            {deleted ? (
+              <span className="text-ink-soft">
+                Deleted by {issue.deleted_by_name ?? 'someone'} <Timestamp iso={issue.deleted_at!} />
+              </span>
+            ) : (
+              <span>Updated {relativeTime(issue.updated_at)}</span>
+            )}
           </div>
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <InlineSelect
-            value={issue.status}
-            options={statusOptions}
-            tone={status.tone}
-            disabled={statusOptions.length === 0}
-            onChange={(next) => update({ status: next })}
-          />
-          {action && (
-            <Button size="sm" variant="primary" onClick={() => update({ status: action.next })}>
-              {action.label}
-            </Button>
+          {deleted ? (
+            canRestore && (
+              <Button size="sm" onClick={restore}>
+                Restore
+              </Button>
+            )
+          ) : (
+            <>
+              <InlineSelect
+                value={issue.status}
+                options={statusOptions}
+                tone={status.tone}
+                disabled={statusOptions.length === 0}
+                onChange={(next) => update({ status: next })}
+              />
+              {action && (
+                <Button size="sm" variant="primary" onClick={() => update({ status: action.next })}>
+                  {action.label}
+                </Button>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -175,6 +227,28 @@ export default function IssueCard({
           )}
 
           {loading && <p className="text-xs text-ink-faint">Loading conversation...</p>}
+
+          {canDelete && !deleted && (
+            <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3 text-xs">
+              {confirmDelete ? (
+                <>
+                  <span className="text-ink-soft">
+                    Delete this issue? It stays in the site history and under the Deleted filter, and can be restored.
+                  </span>
+                  <Button size="sm" variant="danger" onClick={remove}>
+                    Yes, delete
+                  </Button>
+                  <Button size="sm" onClick={() => setConfirmDelete(false)}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <button onClick={() => setConfirmDelete(true)} className="text-ink-faint hover:text-tone-red">
+                  Delete this issue
+                </button>
+              )}
+            </div>
+          )}
 
           {issueAttachments.length > 0 && <Gallery attachments={issueAttachments} onDeleted={reloadDetail} />}
 

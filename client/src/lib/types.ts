@@ -83,6 +83,9 @@ export interface Issue {
   batch_title?: string | null;
   comment_count?: number;
   qa_rounds?: number;
+  deleted_at: string | null;
+  deleted_by: number | null;
+  deleted_by_name?: string | null;
 }
 
 export interface Comment {

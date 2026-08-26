@@ -39,12 +39,18 @@ issuesRouter.get('/', (req, res) => {
   const where = [];
   const params = [];
 
-  if (req.query.status === 'open') {
-    where.push(`i.status IN (${OPEN_ISSUE_STATUSES.map(() => '?').join(',')})`);
-    params.push(...OPEN_ISSUE_STATUSES);
-  } else if (req.query.status) {
-    where.push('i.status = ?');
-    params.push(req.query.status);
+  // A deleted issue is only ever returned when it is explicitly asked for.
+  if (req.query.status === 'deleted') {
+    where.push('i.deleted_at IS NOT NULL');
+  } else {
+    where.push('i.deleted_at IS NULL');
+    if (req.query.status === 'open') {
+      where.push(`i.status IN (${OPEN_ISSUE_STATUSES.map(() => '?').join(',')})`);
+      params.push(...OPEN_ISSUE_STATUSES);
+    } else if (req.query.status) {
+      where.push('i.status = ?');
+      params.push(req.query.status);
+    }
   }
   for (const [param, column] of [['site_id', 'i.site_id'], ['type', 'i.type'], ['severity', 'i.severity'], ['category', 'i.category'], ['assignee_id', 'i.assignee_id'], ['batch_id', 'i.batch_id']]) {
     if (req.query[param]) {
@@ -61,14 +67,15 @@ issuesRouter.get('/', (req, res) => {
   const issues = db
     .prepare(
       `SELECT i.*, s.domain, s.priority AS site_priority,
-              r.name AS reporter_name, a.name AS assignee_name,
+              r.name AS reporter_name, a.name AS assignee_name, d.name AS deleted_by_name,
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comment_count,
               (SELECT COUNT(*) FROM activity ac WHERE ac.issue_id = i.id AND ac.field = 'status' AND ac.new_value = 'ready_for_qa') AS qa_rounds
          FROM issues i
          JOIN sites s ON s.id = i.site_id
          LEFT JOIN users r ON r.id = i.reporter_id
          LEFT JOIN users a ON a.id = i.assignee_id
-        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+         LEFT JOIN users d ON d.id = i.deleted_by
+        WHERE ${where.join(' AND ')}
         ORDER BY CASE i.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'ready_for_qa' THEN 2 WHEN 'verified' THEN 3 ELSE 4 END,
                  CASE i.severity WHEN 'blocker' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
                  s.priority ASC, i.id DESC
@@ -92,7 +99,7 @@ issuesRouter.get('/export.csv', (req, res) => {
          JOIN sites s ON s.id = i.site_id
          LEFT JOIN users r ON r.id = i.reporter_id
          LEFT JOIN users a ON a.id = i.assignee_id
-        ${onlyOpen ? `WHERE i.status IN (${OPEN_ISSUE_STATUSES.map(() => '?').join(',')})` : ''}
+        WHERE i.deleted_at IS NULL${onlyOpen ? ` AND i.status IN (${OPEN_ISSUE_STATUSES.map(() => '?').join(',')})` : ''}
         ORDER BY s.priority, s.domain, i.id`
     )
     .all(...(onlyOpen ? OPEN_ISSUE_STATUSES : []));
@@ -119,13 +126,14 @@ issuesRouter.get('/export.csv', (req, res) => {
 issuesRouter.get('/:id', (req, res) => {
   const issue = db
     .prepare(
-      `SELECT i.*, s.domain, s.test_url, r.name AS reporter_name, a.name AS assignee_name, b.title AS batch_title,
+      `SELECT i.*, s.domain, s.test_url, r.name AS reporter_name, a.name AS assignee_name, d.name AS deleted_by_name, b.title AS batch_title,
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comment_count,
               (SELECT COUNT(*) FROM activity ac WHERE ac.issue_id = i.id AND ac.field = 'status' AND ac.new_value = 'ready_for_qa') AS qa_rounds
          FROM issues i
          JOIN sites s ON s.id = i.site_id
          LEFT JOIN users r ON r.id = i.reporter_id
          LEFT JOIN users a ON a.id = i.assignee_id
+         LEFT JOIN users d ON d.id = i.deleted_by
          LEFT JOIN batches b ON b.id = i.batch_id
         WHERE i.id = ?`
     )
@@ -152,7 +160,7 @@ issuesRouter.get('/:id', (req, res) => {
     ? db
         .prepare(
           `SELECT i.id, i.status, s.domain FROM issues i JOIN sites s ON s.id = i.site_id
-            WHERE i.batch_id = ? AND i.id != ? ORDER BY s.priority, s.domain`
+            WHERE i.batch_id = ? AND i.id != ? AND i.deleted_at IS NULL ORDER BY s.priority, s.domain`
         )
         .all(issue.batch_id, issue.id)
     : [];
@@ -212,6 +220,8 @@ issuesRouter.patch('/:id', (req, res) => {
   const id = Number(req.params.id);
   const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
+
+  if (issue.deleted_at) return res.status(409).json({ error: 'This issue is deleted. Restore it first.' });
 
   const parsed = z
     .object({ ...baseIssue, status: statusEnum })
@@ -363,18 +373,39 @@ issuesRouter.delete('/attachments/:attachmentId', (req, res) => {
   res.json({ ok: true });
 });
 
+/**
+ * Deleting hides the issue and records who did it. Nothing is erased: it stays
+ * in the site's history, it is listed under the "Deleted" filter, and it can be
+ * restored. Comments and screenshots ride along untouched.
+ */
 issuesRouter.delete('/:id', (req, res) => {
   const id = Number(req.params.id);
   const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
   if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  if (issue.deleted_at) return res.json({ ok: true, issue });
   if (req.user.role !== 'admin' && issue.reporter_id !== req.user.id) {
     return res.status(403).json({ error: 'Only the reporter or an admin can delete an issue' });
   }
-  const keys = db.prepare('SELECT storage_key FROM attachments WHERE issue_id = ?').all(id).map((row) => row.storage_key);
-  db.prepare('DELETE FROM issues WHERE id = ?').run(id);
-  keys.forEach(removeUpload);
 
-  res.json({ ok: true });
+  db.prepare("UPDATE issues SET deleted_at = datetime('now'), deleted_by = ?, updated_at = datetime('now') WHERE id = ?").run(req.user.id, id);
+  logActivity({ siteId: issue.site_id, issueId: id, actorId: req.user.id, kind: 'issue_deleted', newValue: issue.title });
+
+  res.json({ ok: true, issue: db.prepare('SELECT * FROM issues WHERE id = ?').get(id) });
+});
+
+issuesRouter.post('/:id/restore', (req, res) => {
+  const id = Number(req.params.id);
+  const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
+  if (!issue) return res.status(404).json({ error: 'Issue not found' });
+  if (!issue.deleted_at) return res.json({ ok: true, issue });
+  if (req.user.role !== 'admin' && issue.reporter_id !== req.user.id && issue.deleted_by !== req.user.id) {
+    return res.status(403).json({ error: 'Only the reporter, whoever deleted it, or an admin can restore an issue' });
+  }
+
+  db.prepare("UPDATE issues SET deleted_at = NULL, deleted_by = NULL, updated_at = datetime('now') WHERE id = ?").run(id);
+  logActivity({ siteId: issue.site_id, issueId: id, actorId: req.user.id, kind: 'issue_restored', newValue: issue.title });
+
+  res.json({ ok: true, issue: db.prepare('SELECT * FROM issues WHERE id = ?').get(id) });
 });
 
 function insertIssue(fields, actorId, domain) {

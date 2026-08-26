@@ -66,8 +66,13 @@ export function InlineSelect<T extends string>({
         disabled={disabled}
         title={title ?? current?.label}
         onChange={(event) => onChange(event.target.value as T)}
-        className={`w-full max-w-full appearance-none truncate rounded-full py-0.5 text-xs font-medium outline-none transition
-          ${compact ? 'pl-1.5' : 'pl-2'} ${TONE_CLASS[tone]}
+        /*
+         * Only a table cell forces the select to its column width. Everywhere
+         * else `w-full` inside an inline-block wrapper collapses it onto its own
+         * shrink-to-fit width, which is what cut "EUR" down to "E...".
+         */
+        className={`appearance-none rounded-full py-0.5 text-xs font-medium outline-none transition
+          ${compact ? 'w-full max-w-full truncate pl-1.5' : 'pl-2'} ${TONE_CLASS[tone]}
           ${disabled ? 'cursor-default pr-2' : `cursor-pointer ${compact ? 'pr-4' : 'pr-5'} hover:brightness-95 focus:ring-2 focus:ring-brand/40`}`}
       >
         {options.map((option) => (

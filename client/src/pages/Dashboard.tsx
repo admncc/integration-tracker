@@ -170,7 +170,11 @@ export default function Dashboard() {
                         ? 'attached'
                         : entry.kind === 'message_posted'
                           ? 'wrote'
-                          : 'changed'}{' '}
+                          : entry.kind === 'issue_deleted'
+                            ? 'deleted'
+                            : entry.kind === 'issue_restored'
+                              ? 'restored'
+                              : 'changed'}{' '}
                   {entry.kind === 'issue_status' ? (ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value) : entry.new_value ?? entry.field}
                   {entry.domain && (
                     <>

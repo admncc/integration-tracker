@@ -40,9 +40,9 @@ function listSites({ includeArchived = false } = {}) {
   return db
     .prepare(
       `SELECT s.*,
-              (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.status IN (${openList})) AS open_issues,
-              (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.status = 'ready_for_qa')  AS awaiting_qa,
-              (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id) AS total_issues,
+              (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status IN (${openList})) AS open_issues,
+              (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status = 'ready_for_qa') AS awaiting_qa,
+              (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL) AS total_issues,
               (SELECT COUNT(*) FROM site_messages m WHERE m.site_id = s.id) AS message_count
          FROM sites s
         WHERE (? = 1 OR s.archived = 0)
@@ -63,10 +63,12 @@ sitesRouter.get('/:id', (req, res) => {
     .prepare(
       `SELECT i.*, r.name AS reporter_name, a.name AS assignee_name,
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comment_count,
-              (SELECT COUNT(*) FROM activity ac WHERE ac.issue_id = i.id AND ac.field = 'status' AND ac.new_value = 'ready_for_qa') AS qa_rounds
+              (SELECT COUNT(*) FROM activity ac WHERE ac.issue_id = i.id AND ac.field = 'status' AND ac.new_value = 'ready_for_qa') AS qa_rounds,
+              d.name AS deleted_by_name
          FROM issues i
          LEFT JOIN users r ON r.id = i.reporter_id
          LEFT JOIN users a ON a.id = i.assignee_id
+         LEFT JOIN users d ON d.id = i.deleted_by
         WHERE i.site_id = ?
         ORDER BY CASE i.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'ready_for_qa' THEN 2 ELSE 3 END,
                  CASE i.severity WHEN 'blocker' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,

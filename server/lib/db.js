@@ -91,7 +91,9 @@ CREATE TABLE IF NOT EXISTS issues (
   created_at   TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
   resolved_at  TEXT,
-  closed_at    TEXT
+  closed_at    TEXT,
+  deleted_at   TEXT,
+  deleted_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
 );
 CREATE INDEX IF NOT EXISTS idx_issues_site ON issues(site_id);
 CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
@@ -165,6 +167,17 @@ if (!siteColumns.includes('rpm_previous_currency')) {
 if (!siteColumns.includes('rpm_primis_currency')) {
   db.exec("ALTER TABLE sites ADD COLUMN rpm_primis_currency TEXT NOT NULL DEFAULT 'USD'");
 }
+
+/*
+ * Deleting an issue hides it rather than erasing it: the history has to keep
+ * showing that it existed, and a wrong delete has to be reversible.
+ */
+const issueCols = db.prepare('PRAGMA table_info(issues)').all().map((c) => c.name);
+if (!issueCols.includes('deleted_at')) {
+  db.exec('ALTER TABLE issues ADD COLUMN deleted_at TEXT');
+  db.exec('ALTER TABLE issues ADD COLUMN deleted_by INTEGER REFERENCES users(id) ON DELETE SET NULL');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_issues_deleted ON issues(deleted_at)');
 
 const issueColumns = db.prepare('PRAGMA table_info(issues)').all().map((c) => c.name);
 if (!issueColumns.includes('type')) {
