@@ -65,7 +65,7 @@ authRouter.post('/login', (req, res) => {
 
   attempts.delete(key);
   const session = createSession(row.id);
-  res.cookie(SESSION_COOKIE, session.id, cookieOptions());
+  res.cookie(SESSION_COOKIE, session.id, cookieOptions(req));
   res.json({ user: { id: row.id, username: row.username, email: row.email, name: row.name, role: row.role, company: row.company } });
 });
 

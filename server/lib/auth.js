@@ -69,11 +69,22 @@ export function requireRole(...roles) {
   };
 }
 
-export function cookieOptions() {
+/**
+ * `secure` follows the actual connection rather than NODE_ENV. Marking the cookie
+ * secure on a plain-HTTP deployment makes the browser drop it silently: the sign-in
+ * request succeeds, every request after it is a 401, and the app looks empty.
+ *
+ * `req.secure` is true for direct HTTPS, and behind a reverse proxy it reads
+ * X-Forwarded-Proto once TRUST_PROXY is set — so a proper deployment still gets
+ * a secure cookie. INSECURE_COOKIES=1 forces it off if a proxy reports the wrong
+ * protocol.
+ */
+export function cookieOptions(req) {
+  const overHttps = process.env.INSECURE_COOKIES === '1' ? false : Boolean(req?.secure);
   return {
     httpOnly: true,
     sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production' && process.env.INSECURE_COOKIES !== '1',
+    secure: overHttps,
     maxAge: SESSION_DAYS * 864e5,
     path: '/',
   };

@@ -63,8 +63,10 @@ sudo -u tracker -H npm run build
 sudo -u tracker -H npm run seed
 ```
 
-The seed prints the accounts it created. `npm run build` must be re-run after
-every `git pull`, otherwise the browser keeps serving the old interface.
+The seed prints the accounts it created and is safe to re-run: it only ever adds
+rows, so a later `git pull` can bring in new domains without resetting a status
+somebody moved by hand. `npm run build` must be re-run after every `git pull`,
+otherwise the browser keeps serving the old interface.
 
 Quick check before setting up the service:
 
@@ -155,9 +157,9 @@ sudo -u tracker -H npm run build
 sudo systemctl restart integration-tracker
 ```
 
-Schema changes apply themselves on start-up; `npm run seed` is only for the
-first install and never has to be run again. Take a backup before an update
-anyway.
+Schema changes apply themselves on start-up. `npm run seed` is additive, so
+re-running it after an update picks up newly listed domains and leaves
+everything you have edited alone. Take a backup before an update anyway.
 
 ## Troubleshooting
 
@@ -168,4 +170,5 @@ anyway.
 | 502 from nginx | the service is down, or `PORT` in `.env` does not match `proxy_pass` |
 | 413 when uploading a screenshot | `client_max_body_size` missing from the nginx server block |
 | Sign-in says "too many attempts" for everyone | `TRUST_PROXY=1` missing from `.env` |
+| Sign-in works but every page is empty | old build: the session cookie was dropped over plain HTTP. `git pull` and rebuild |
 | Exchange rate stuck at 1.08 | the server cannot reach `ecb.europa.eu`; set the rate by hand under Settings |

@@ -70,6 +70,8 @@ npm run seed        # current sites, RPM figures and the open QA findings
 npm run dev         # API on :4000, UI on :5173
 ```
 
+`npm run seed` only ever adds rows, so it is safe to re-run after an update.
+
 Sign in with `admin` / `changeme123`. The seed also creates `dev`, `dev-extern`
 and `primis-qa` with the same password — **change them before the partner gets a
 link.**

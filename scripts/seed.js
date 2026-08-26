@@ -107,15 +107,14 @@ const dev = userIds.dev;
 const externalDev = userIds['dev-extern'];
 const partner = userIds['primis-qa'];
 
+/*
+ * Additive on purpose: re-running the seed after a `git pull` brings in newly
+ * listed domains without resetting a status somebody has since moved by hand.
+ */
 const upsertSite = db.prepare(`
-  INSERT INTO sites (domain, priority, test_url, status_video, status_display, status_ads_txt, status_ad_tag, status_mcm, cmp, approval, managed_by)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(domain) DO UPDATE SET
-    priority = excluded.priority, test_url = excluded.test_url,
-    status_video = excluded.status_video, status_display = excluded.status_display,
-    status_ads_txt = excluded.status_ads_txt, status_ad_tag = excluded.status_ad_tag,
-    status_mcm = excluded.status_mcm, cmp = excluded.cmp, approval = excluded.approval,
-    updated_at = datetime('now')
+  INSERT INTO sites (domain, priority, test_url, status_video, status_display, status_ads_txt, status_ad_tag, status_mcm, cmp, approval, managed_by, notes)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(domain) DO NOTHING
 `);
 
 // Domains the mail thread flags as handled by a third party — worth carrying over.
@@ -129,16 +128,47 @@ for (const line of SHEET.split('\n')) {
     console.warn(`Skipped unparseable domain: ${rawDomain}`);
     continue;
   }
-  upsertSite.run(
+  const info = upsertSite.run(
     domain,
     Number.parseInt(prio, 10) || 99,
     testUrl ?? '',
     parseStatus(video), parseStatus(display), parseStatus(adsTxt), parseStatus(adTag), parseStatus(mcm),
     parseCmp(cmp), parseApproval(approval),
-    EXTERNALLY_MANAGED.has(domain) ? 'External team' : ''
+    EXTERNALLY_MANAGED.has(domain) ? 'External team' : '',
+    ''
   );
-  siteCount += 1;
+  if (info.changes > 0) siteCount += 1;
 }
+
+/*
+ * Live on the revenue side but absent from the Primis rollout sheet, so they are
+ * tracked with every integration track still pending. Where the revenue sheet
+ * carried a tracking link rather than an article URL, it goes into the notes —
+ * it is not a page the partner can QA against.
+ */
+const REVENUE_ONLY = [
+  ['wholekitchensink.com', 'Active on the revenue side. Tracking link: https://gnxm5.ttrk.io/6953101d99fa978f1afc17cd'],
+  ['zitatecke.de', 'Active on the revenue side. Tracking link: https://gnxm5.ttrk.io/695ae862076a3d4e737303f6'],
+  ['beautyandthebenchpress.com', 'Active on the revenue side, no RPM reported yet. Tracking link: https://gnxm5.ttrk.io/69c0ec507b35c8c14baccccf'],
+  ['forkidsplus.com', 'Active on the revenue side.'],
+  ['labon.fr', 'Active on the revenue side.'],
+  ['hotelsandhoteliers.com', 'Active on the revenue side, flagged for review.'],
+];
+
+let extraCount = 0;
+for (const [rawDomain, note] of REVENUE_ONLY) {
+  const domain = normaliseDomain(rawDomain);
+  if (!domain) continue;
+  const info = upsertSite.run(
+    domain, 99, '',
+    'pending', 'pending', 'pending', 'pending', 'pending',
+    'none', 'none', '',
+    `${note} Not part of the Primis rollout list yet.`
+  );
+  if (info.changes > 0) extraCount += 1;
+}
+
+db.prepare("UPDATE sites SET notes = 'Paused on the revenue side.' WHERE domain = 'news-7.de' AND notes = ''").run();
 
 const siteId = (domain) => db.prepare('SELECT id FROM sites WHERE domain = ?').get(normaliseDomain(domain))?.id;
 const siteExists = (domain) => Boolean(db.prepare('SELECT 1 FROM sites WHERE domain = ?').get(domain));
@@ -408,7 +438,8 @@ for (const line of PREVIOUS_RPM.split('\n')) {
 }
 
 const counts = db.prepare('SELECT (SELECT COUNT(*) FROM sites) AS sites, (SELECT COUNT(*) FROM issues) AS issues, (SELECT COUNT(*) FROM users) AS users').get();
-console.log(`Seeded ${siteCount} sheet rows.`);
+console.log(`Added ${siteCount} domain(s) from the rollout sheet and ${extraCount} from the revenue sheet.`);
+console.log('Existing rows were left untouched — the seed only ever adds.');
 console.log(`Set Previous Session RPM on ${rpmSet} site(s).`);
 if (rpmMissing.length) console.log(`Not tracked yet, RPM skipped: ${rpmMissing.join(', ')}`);
 console.log(`Database now holds ${counts.sites} sites, ${counts.issues} issues, ${counts.users} users.`);

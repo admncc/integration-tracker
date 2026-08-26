@@ -18,7 +18,13 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new ApiError((payload as { error?: string }).error ?? `Request failed (${response.status})`, response.status);
+    const error = new ApiError((payload as { error?: string }).error ?? `Request failed (${response.status})`, response.status);
+    // A session that expired mid-visit should return to the sign-in form, not
+    // leave every page rendering its own "Not signed in".
+    if (response.status === 401 && !path.startsWith('/auth/')) {
+      window.dispatchEvent(new CustomEvent('tracker:signed-out'));
+    }
+    throw error;
   }
   return payload as T;
 }
