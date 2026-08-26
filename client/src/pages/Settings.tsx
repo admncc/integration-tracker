@@ -17,7 +17,7 @@ interface FxSettings {
 }
 
 export default function Settings() {
-  const { user, can } = useSession();
+  const { user } = useSession();
   const [users, setUsers] = useState<User[]>([]);
   const [creating, setCreating] = useState(false);
   const [resetting, setResetting] = useState<User | null>(null);
@@ -56,16 +56,12 @@ export default function Settings() {
           <div>
             <h2 className="text-sm font-semibold">People</h2>
             <p className="text-xs text-ink-soft">
-              {can('manage_users')
-                ? "Create an account for each developer and for the partner's QA contacts."
-                : 'Only an admin can add or change accounts.'}
+              Create an account for each developer and for the partner's QA contacts.
             </p>
           </div>
-          {can('manage_users') && (
-            <Button variant="primary" onClick={() => setCreating(true)}>
-              + New user
-            </Button>
-          )}
+          <Button variant="primary" onClick={() => setCreating(true)}>
+            + New user
+          </Button>
         </header>
 
         <table className="w-full text-sm">
@@ -76,7 +72,7 @@ export default function Settings() {
               <th className="px-4 py-2 font-medium">Company</th>
               <th className="px-4 py-2 font-medium">Role</th>
               <th className="px-4 py-2 font-medium">Status</th>
-              {can('manage_users') && <th className="px-4 py-2" />}
+              <th className="px-4 py-2" />
             </tr>
           </thead>
           <tbody>
@@ -89,27 +85,21 @@ export default function Settings() {
                 <td className="px-4 py-2 font-mono text-xs">{row.username}</td>
                 <td className="px-4 py-2 text-ink-soft">{row.company || '-'}</td>
                 <td className="px-4 py-2">
-                  {can('manage_users') ? (
-                    <select className="field !w-auto !py-1 text-xs" value={row.role} onChange={(event) => changeRole(row, event.target.value as User['role'])}>
-                      {ROLE_ENTRIES.map(([value, meta]) => (
-                        <option key={value} value={value}>{meta.label}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <Badge tone={row.role === 'partner' ? 'purple' : row.role === 'admin' ? 'blue' : 'slate'}>{ROLES[row.role].label}</Badge>
-                  )}
+                  <select className="field !w-auto !py-1 text-xs" value={row.role} onChange={(event) => changeRole(row, event.target.value as User['role'])}>
+                    {ROLE_ENTRIES.map(([value, meta]) => (
+                      <option key={value} value={value}>{meta.label}</option>
+                    ))}
+                  </select>
                 </td>
                 <td className="px-4 py-2">
                   <Badge tone={row.active ? 'green' : 'muted'}>{row.active ? 'Active' : 'Disabled'}</Badge>
                 </td>
-                {can('manage_users') && (
-                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                <td className="px-4 py-2 text-right whitespace-nowrap">
                     <Button size="sm" onClick={() => setResetting(row)}>Set password</Button>{' '}
-                    <Button size="sm" variant={row.active ? 'danger' : 'secondary'} onClick={() => toggleActive(row)}>
-                      {row.active ? 'Disable' : 'Enable'}
-                    </Button>
-                  </td>
-                )}
+                  <Button size="sm" variant={row.active ? 'danger' : 'secondary'} onClick={() => toggleActive(row)}>
+                    {row.active ? 'Disable' : 'Enable'}
+                  </Button>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -120,8 +110,7 @@ export default function Settings() {
 
       <div className="grid gap-4 lg:grid-cols-2">
         <ExchangeRatePanel />
-        <ChangeOwnPassword />
-        {can('import') && <ImportPanel />}
+        <ImportPanel />
       </div>
 
       <section className="card p-4">
@@ -258,7 +247,7 @@ function ResetPasswordModal({ target, onClose }: { target: User; onClose: () => 
  * so every comparison in the tool is normalised through this one rate.
  */
 function ExchangeRatePanel() {
-  const { can, setEurUsd } = useSession();
+  const { setEurUsd } = useSession();
   const [settings, setSettings] = useState<FxSettings | null>(null);
   const [rate, setRate] = useState('');
   const [state, setState] = useState<{ error?: string; done?: string }>({});
@@ -327,32 +316,25 @@ function ExchangeRatePanel() {
             step="0.0001"
             min="0.0001"
             required
-            disabled={!can('manage_users')}
             value={rate}
             onChange={(event) => setRate(event.target.value)}
           />
         </Field>
-        {can('manage_users') && (
-          <>
-            <Button type="submit" disabled={busy}>Save manually</Button>
-            <Button type="button" variant="primary" onClick={refreshNow} disabled={busy}>
-              {busy ? 'Fetching...' : 'Fetch from ECB now'}
-            </Button>
-          </>
-        )}
+        <Button type="submit" disabled={busy}>Save manually</Button>
+        <Button type="button" variant="primary" onClick={refreshNow} disabled={busy}>
+          {busy ? 'Fetching...' : 'Fetch from ECB now'}
+        </Button>
       </form>
 
-      {can('manage_users') && (
-        <label className="mt-3 flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={settings.auto}
-            disabled={busy}
-            onChange={(event) => save({ fx_auto: event.target.checked }, event.target.checked ? 'Daily updates on' : 'Daily updates off')}
-          />
-          Pull the official ECB reference rate automatically (on start-up and every 12 hours)
-        </label>
-      )}
+      <label className="mt-3 flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={settings.auto}
+          disabled={busy}
+          onChange={(event) => save({ fx_auto: event.target.checked }, event.target.checked ? 'Daily updates on' : 'Daily updates off')}
+        />
+        Pull the official ECB reference rate automatically (on start-up and every 12 hours)
+      </label>
 
       <dl className="mt-3 space-y-0.5 text-xs text-ink-faint">
         <div>
@@ -375,40 +357,6 @@ function ExchangeRatePanel() {
 
       {state.done && <p className="mt-2 text-sm text-tone-green">{state.done}</p>}
       {state.error && <p className="mt-2 text-sm text-tone-red">{state.error}</p>}
-    </section>
-  );
-}
-
-function ChangeOwnPassword() {
-  const [form, setForm] = useState({ current: '', next: '' });
-  const [state, setState] = useState<{ error?: string; done?: boolean }>({});
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    setState({});
-    try {
-      await api.post('/auth/password', form);
-      setState({ done: true });
-      setForm({ current: '', next: '' });
-    } catch (err) {
-      setState({ error: err instanceof Error ? err.message : 'Could not change the password' });
-    }
-  }
-
-  return (
-    <section className="card p-4">
-      <h2 className="mb-3 text-sm font-semibold">Your password</h2>
-      <form onSubmit={submit} className="space-y-3">
-        <Field label="Current password">
-          <input className="field" type="password" required value={form.current} onChange={(e) => setForm({ ...form, current: e.target.value })} />
-        </Field>
-        <Field label="New password" hint="At least 8 characters.">
-          <input className="field" type="password" required minLength={8} value={form.next} onChange={(e) => setForm({ ...form, next: e.target.value })} />
-        </Field>
-        {state.error && <p className="text-sm text-tone-red">{state.error}</p>}
-        {state.done && <p className="text-sm text-tone-green">Password changed.</p>}
-        <Button type="submit" variant="primary">Change password</Button>
-      </form>
     </section>
   );
 }

@@ -258,7 +258,7 @@ metaRouter.get('/export.csv', (_req, res) => {
 });
 
 /** Upserts by domain: re-importing the sheet updates rows instead of duplicating them. */
-metaRouter.post('/import', requireRole('admin', 'dev'), (req, res) => {
+metaRouter.post('/import', requireRole('admin'), (req, res) => {
   const parsed = z.object({ csv: z.string().min(1), dry_run: z.boolean().default(false) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Paste the CSV into the "csv" field' });
 

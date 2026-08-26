@@ -19,7 +19,7 @@ export type Action = 'edit_site' | 'manage_sites' | 'manage_users' | 'raise_issu
 
 const CAPABILITIES: Record<User['role'], Action[]> = {
   admin: ['edit_site', 'manage_sites', 'manage_users', 'raise_issue', 'work_issue', 'verify_issue', 'import'],
-  dev: ['edit_site', 'manage_sites', 'raise_issue', 'work_issue', 'import'],
+  dev: ['edit_site', 'manage_sites', 'raise_issue', 'work_issue'],
   partner: ['raise_issue', 'verify_issue'],
 };
 

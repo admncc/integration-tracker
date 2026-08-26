@@ -8,12 +8,14 @@ import SiteDetail from './pages/SiteDetail';
 import Issues from './pages/Issues';
 import IssueDetail from './pages/IssueDetail';
 import Settings from './pages/Settings';
+import Account from './pages/Account';
 
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/sites', label: 'Sites' },
   { to: '/issues', label: 'Issues' },
-  { to: '/settings', label: 'Settings' },
+  // Settings is admin only; it holds users, the exchange rate and the importer.
+  { to: '/settings', label: 'Settings', adminOnly: true },
 ];
 
 export default function App() {
@@ -32,7 +34,7 @@ export default function App() {
           </div>
 
           <nav className="flex items-center gap-1">
-            {NAV.map((item) => (
+            {NAV.filter((item) => !item.adminOnly || user.role === 'admin').map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
@@ -49,12 +51,12 @@ export default function App() {
           </nav>
 
           <div className="ml-auto flex items-center gap-3 text-sm">
-            <div className="text-right leading-tight">
+            <NavLink to="/account" className="rounded-lg px-2 py-1 text-right leading-tight transition hover:bg-raised">
               <div className="font-medium">{user.name}</div>
               <div className="text-xs text-ink-faint">
                 {user.company || user.role} · {user.role}
               </div>
-            </div>
+            </NavLink>
             <button onClick={signOut} className="rounded-lg px-2.5 py-1.5 text-sm text-ink-soft hover:bg-raised hover:text-ink">
               Sign out
             </button>
@@ -69,7 +71,9 @@ export default function App() {
           <Route path="/sites/:id" element={<SiteDetail />} />
           <Route path="/issues" element={<Issues />} />
           <Route path="/issues/:id" element={<IssueDetail />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/account" element={<Account />} />
+          {/* A non-admin reaching this by hand is sent home rather than shown a page that 403s. */}
+          <Route path="/settings" element={user.role === 'admin' ? <Settings /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
