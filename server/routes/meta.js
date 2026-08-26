@@ -115,14 +115,21 @@ metaRouter.get('/settings', (_req, res) => {
 });
 
 metaRouter.patch('/settings', requireRole('admin'), (req, res) => {
+  /*
+   * Strict types, not coercion: z.coerce turned `true` into the rate 1 and the
+   * string "false" into automation switched on.
+   */
   const parsed = z
     .object({
-      [FX_SETTING_KEY]: z.coerce.number().gt(0).lt(100),
-      fx_auto: z.coerce.boolean(),
+      [FX_SETTING_KEY]: z.number({ invalid_type_error: 'The EUR/USD rate must be a number' }).gt(0).lt(100),
+      fx_auto: z.boolean({ invalid_type_error: 'The daily-update switch must be true or false' }),
     })
     .partial()
+    .strict()
     .safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'The EUR/USD rate must be a positive number' });
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'The EUR/USD rate must be a positive number' });
+  }
 
   if (parsed.data[FX_SETTING_KEY] !== undefined) {
     setSetting(FX_SETTING_KEY, parsed.data[FX_SETTING_KEY]);

@@ -172,6 +172,16 @@ if (!siteColumns.includes('rpm_primis_currency')) {
  * Deleting an issue hides it rather than erasing it: the history has to keep
  * showing that it existed, and a wrong delete has to be reversible.
  */
+/*
+ * A deleted discussion message is tombstoned rather than removed. The reply
+ * that quotes it keeps its thread: erasing the row set reply_to_id to NULL and
+ * the quote block vanished, leaving the answer with no question.
+ */
+const messageCols = db.prepare('PRAGMA table_info(site_messages)').all().map((c) => c.name);
+if (!messageCols.includes('deleted_at')) {
+  db.exec('ALTER TABLE site_messages ADD COLUMN deleted_at TEXT');
+}
+
 const issueCols = db.prepare('PRAGMA table_info(issues)').all().map((c) => c.name);
 if (!issueCols.includes('deleted_at')) {
   db.exec('ALTER TABLE issues ADD COLUMN deleted_at TEXT');

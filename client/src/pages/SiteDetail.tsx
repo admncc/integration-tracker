@@ -205,7 +205,11 @@ export default function SiteDetail() {
                 <span className="text-xs text-ink-faint">Δ vs. previous setup</span>
                 <div className="mt-1">
                   {uplift == null ? (
-                    <span className="text-sm text-ink-faint">Enter both figures</span>
+                    <span className="text-sm text-ink-faint">
+                      {site.rpm_previous != null && site.rpm_primis != null
+                        ? 'No comparison: the previous RPM is zero'
+                        : 'Enter both figures'}
+                    </span>
                   ) : (
                     <Badge tone={uplift > 0 ? 'green' : uplift < 0 ? 'red' : 'slate'}>
                       {uplift > 0 ? '+' : ''}
@@ -223,7 +227,15 @@ export default function SiteDetail() {
 
           </section>
 
-          <SiteChat siteId={site.id} messages={messages} onChange={setMessages} />
+          <SiteChat
+            siteId={site.id}
+            messages={messages}
+            onChange={(next) => {
+              setMessages(next);
+              // The activity trail is written server-side, so it has to be refetched.
+              load();
+            }}
+          />
 
           <section className="space-y-3">
             <div className="flex flex-wrap items-center gap-2">
@@ -297,7 +309,7 @@ export default function SiteDetail() {
         </aside>
       </div>
 
-      {can('manage_sites') && (
+      {can('delete_site') && (
         <section className="rounded-xl border border-tone-red/30 bg-tone-red-bg/30 p-4">
           <h2 className="text-sm font-semibold text-tone-red">Remove this site</h2>
           <p className="mt-1 mb-3 max-w-2xl text-sm text-ink-soft">
@@ -360,8 +372,14 @@ export default function SiteDetail() {
               variant="danger"
               disabled={confirmText.trim() !== site.domain}
               onClick={async () => {
-                await api.del(`/sites/${site.id}`);
-                navigate('/sites');
+                try {
+                  await api.del(`/sites/${site.id}`);
+                  navigate('/sites');
+                } catch (err) {
+                  // An unhandled rejection here left the dialog open and silent.
+                  setError(err instanceof Error ? err.message : 'Could not delete this site');
+                  setConfirmRemove(false);
+                }
               }}
             >
               Delete permanently
@@ -380,18 +398,46 @@ export default function SiteDetail() {
 function TestUrlBar({ url, disabled, onSave }: { url: string; disabled: boolean; onSave: (value: string) => void }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(url);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<'done' | 'failed' | null>(null);
 
   useEffect(() => setDraft(url), [url]);
 
+  /**
+   * `navigator.clipboard` only exists in a secure context, and this tool is
+   * meant to run over plain HTTP too, where the button used to fail silently
+   * and sit on "Copy" forever.
+   */
   async function copy() {
+    const viaExecCommand = () => {
+      const field = document.createElement('textarea');
+      field.value = url;
+      field.setAttribute('readonly', '');
+      field.style.cssText = 'position:fixed;top:-1000px;opacity:0';
+      document.body.appendChild(field);
+      field.select();
+      const done = document.execCommand('copy');
+      field.remove();
+      return done;
+    };
+
+    let done = false;
     try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(url);
+        done = true;
+      } else {
+        done = viaExecCommand();
+      }
     } catch {
-      /* clipboard permission denied - the link is still visible and selectable */
+      try {
+        done = viaExecCommand();
+      } catch {
+        done = false;
+      }
     }
+
+    setCopied(done ? 'done' : 'failed');
+    setTimeout(() => setCopied(null), 2000);
   }
 
   if (editing || !url) {
@@ -441,7 +487,9 @@ function TestUrlBar({ url, disabled, onSave }: { url: string; disabled: boolean;
       >
         {url}
       </a>
-      <Button size="sm" onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
+      <Button size="sm" onClick={copy} title={copied === 'failed' ? 'Select the link and copy it by hand' : undefined}>
+        {copied === 'done' ? 'Copied' : copied === 'failed' ? 'Copy failed' : 'Copy'}
+      </Button>
       <a
         href={url}
         target="_blank"

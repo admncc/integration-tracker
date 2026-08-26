@@ -54,8 +54,10 @@ export interface SiteMessage {
   reply_to_id: number | null;
   reply_to_body: string | null;
   reply_to_author: string | null;
+  reply_to_deleted_at: string | null;
   body: string;
   created_at: string;
+  deleted_at: string | null;
 }
 
 export interface Issue {

@@ -140,16 +140,17 @@ sitesRouter.delete('/:id/messages/:messageId', (req, res) => {
     return res.status(403).json({ error: 'Only the author or an admin can delete a message' });
   }
 
-  db.prepare('DELETE FROM site_messages WHERE id = ?').run(message.id);
+  // Tombstone rather than delete, so a reply keeps the question it answers.
+  db.prepare("UPDATE site_messages SET deleted_at = datetime('now'), body = '' WHERE id = ?").run(message.id);
   res.json({ ok: true });
 });
 
 function listMessages(siteId) {
   return db
     .prepare(
-      `SELECT m.id, m.site_id, m.author_id, m.reply_to_id, m.body, m.created_at,
+      `SELECT m.id, m.site_id, m.author_id, m.reply_to_id, m.body, m.created_at, m.deleted_at,
               u.name AS author_name, u.role AS author_role,
-              p.body AS reply_to_body, pu.name AS reply_to_author
+              p.body AS reply_to_body, p.deleted_at AS reply_to_deleted_at, pu.name AS reply_to_author
          FROM site_messages m
          LEFT JOIN users u ON u.id = m.author_id
          LEFT JOIN site_messages p ON p.id = m.reply_to_id

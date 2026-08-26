@@ -58,7 +58,7 @@ export default function SiteChat({
   async function remove(message: SiteMessage) {
     try {
       await api.del(`/sites/${siteId}/messages/${message.id}`);
-      onChange(messages.filter((m) => m.id !== message.id));
+      onChange(messages.map((m) => (m.id === message.id ? { ...m, deleted_at: new Date().toISOString(), body: '' } : m)));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not delete the message');
     }
@@ -89,7 +89,9 @@ export default function SiteChat({
               {message.reply_to_id && (
                 <div className="mb-1.5 border-l-2 border-line-strong pl-2 text-xs text-ink-faint">
                   <span className="font-medium">{message.reply_to_author ?? 'Deleted user'}</span>{' '}
-                  <span className="line-clamp-2">{message.reply_to_body ?? 'message deleted'}</span>
+                  <span className="line-clamp-2">
+                    {message.reply_to_deleted_at ? <em>message deleted</em> : message.reply_to_body}
+                  </span>
                 </div>
               )}
 
@@ -98,19 +100,25 @@ export default function SiteChat({
                 {badge && <Badge tone={badge.tone}>{badge.label}</Badge>}
                 <Timestamp iso={message.created_at} className="text-ink-faint" />
 
-                <span className="ml-auto flex gap-2 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
-                  <button onClick={() => setReplyTo(message)} className="text-ink-faint hover:text-brand">
-                    Reply
-                  </button>
-                  {(mine || user?.role === 'admin') && (
-                    <button onClick={() => remove(message)} className="text-ink-faint hover:text-tone-red">
-                      Delete
+                {!message.deleted_at && (
+                  <span className="ml-auto flex gap-2 opacity-0 transition group-hover:opacity-100 focus-within:opacity-100">
+                    <button onClick={() => setReplyTo(message)} className="text-ink-faint hover:text-brand">
+                      Reply
                     </button>
-                  )}
-                </span>
+                    {(mine || user?.role === 'admin') && (
+                      <button onClick={() => remove(message)} className="text-ink-faint hover:text-tone-red">
+                        Delete
+                      </button>
+                    )}
+                  </span>
+                )}
               </header>
 
-              <p className="mt-1 text-sm whitespace-pre-wrap">{message.body}</p>
+              {message.deleted_at ? (
+                <p className="mt-1 text-sm text-ink-faint italic">This message was deleted.</p>
+              ) : (
+                <p className="mt-1 text-sm whitespace-pre-wrap">{message.body}</p>
+              )}
             </article>
           );
         })}

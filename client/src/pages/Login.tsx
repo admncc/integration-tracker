@@ -3,7 +3,7 @@ import { useSession } from '../lib/session';
 import { Button, Field } from '../components/ui';
 
 export default function Login() {
-  const { signIn } = useSession();
+  const { signIn, expired } = useSession();
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -38,6 +38,11 @@ export default function Login() {
           <input className="field" type="password" autoComplete="current-password" value={password} onChange={(e) => setPassword(e.target.value)} required />
         </Field>
 
+        {expired && !error && (
+          <p className="rounded-lg bg-tone-amber-bg px-3 py-2 text-sm text-tone-amber">
+            Your session ended. Sign in again to pick up where you were.
+          </p>
+        )}
         {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{error}</p>}
 
         <Button type="submit" variant="primary" className="w-full" disabled={busy}>

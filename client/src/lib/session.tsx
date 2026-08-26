@@ -10,15 +10,17 @@ interface SessionValue {
   eurUsd: number;
   setEurUsd: (rate: number) => void;
   signIn: (identifier: string, password: string) => Promise<void>;
+  /** Set when a request came back 401 mid-visit, so the form can explain itself. */
+  expired: boolean;
   signOut: () => Promise<void>;
   can: (action: Action) => boolean;
 }
 
 /** Capability checks the UI reads from; the API enforces the same rules server-side. */
-export type Action = 'edit_site' | 'manage_sites' | 'manage_users' | 'raise_issue' | 'work_issue' | 'verify_issue' | 'import';
+export type Action = 'edit_site' | 'manage_sites' | 'delete_site' | 'manage_users' | 'raise_issue' | 'work_issue' | 'verify_issue' | 'import';
 
 const CAPABILITIES: Record<User['role'], Action[]> = {
-  admin: ['edit_site', 'manage_sites', 'manage_users', 'raise_issue', 'work_issue', 'verify_issue', 'import'],
+  admin: ['edit_site', 'manage_sites', 'delete_site', 'manage_users', 'raise_issue', 'work_issue', 'verify_issue', 'import'],
   dev: ['edit_site', 'manage_sites', 'raise_issue', 'work_issue'],
   partner: ['raise_issue', 'verify_issue'],
 };
@@ -29,6 +31,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [eurUsd, setEurUsd] = useState(DEFAULT_EUR_USD);
+  const [expired, setExpired] = useState(false);
 
   useEffect(() => {
     api
@@ -39,7 +42,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const onSignedOut = () => setUser(null);
+    const onSignedOut = () => {
+      setUser((current) => {
+        if (current) setExpired(true);
+        return null;
+      });
+    };
     window.addEventListener('tracker:signed-out', onSignedOut);
     return () => window.removeEventListener('tracker:signed-out', onSignedOut);
   }, []);
@@ -53,6 +61,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [user]);
 
   const signIn = useCallback(async (identifier: string, password: string) => {
+    setExpired(false);
     await api.post<{ user: User }>('/auth/login', { identifier, password });
 
     /*
@@ -78,8 +87,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const can = useCallback((action: Action) => (user ? CAPABILITIES[user.role].includes(action) : false), [user]);
 
   const value = useMemo(
-    () => ({ user, loading, eurUsd, setEurUsd, signIn, signOut, can }),
-    [user, loading, eurUsd, signIn, signOut, can]
+    () => ({ user, loading, expired, eurUsd, setEurUsd, signIn, signOut, can }),
+    [user, loading, expired, eurUsd, signIn, signOut, can]
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }

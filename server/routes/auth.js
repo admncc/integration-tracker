@@ -81,9 +81,14 @@ authRouter.get('/me', (req, res) => {
 });
 
 authRouter.post('/password', requireAuth, (req, res) => {
-  const schema = z.object({ current: z.string().min(1), next: z.string().min(8) });
+  const schema = z.object({
+    current: z.string().min(1, 'Enter your current password'),
+    next: z.string().min(8, 'The new password must be at least 8 characters'),
+  });
   const parsed = schema.safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'New password must be at least 8 characters' });
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid password' });
+  }
 
   const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(req.user.id);
   if (!verifyPassword(parsed.data.current, row.password_hash)) {
