@@ -77,7 +77,9 @@ CREATE TABLE IF NOT EXISTS batches (
 
 CREATE TABLE IF NOT EXISTS issues (
   id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  site_id      INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+  -- NULL means the issue is network-wide: it belongs to no single domain and
+  -- is ticked off once for the whole network (an ads.txt line, an MCM change).
+  site_id      INTEGER REFERENCES sites(id) ON DELETE CASCADE,
   batch_id     INTEGER REFERENCES batches(id) ON DELETE SET NULL,
   title        TEXT NOT NULL,
   description  TEXT NOT NULL DEFAULT '',
@@ -195,6 +197,55 @@ if (!issueColumns.includes('type')) {
   db.exec("UPDATE issues SET type = 'revenue' WHERE category IN ('performance', 'fill_rate')");
 }
 db.exec('CREATE INDEX IF NOT EXISTS idx_issues_type ON issues(type)');
+
+/*
+ * Network-wide issues live in the same table with no site attached, so every
+ * filter, comment and attachment keeps working on them. SQLite cannot drop a
+ * NOT NULL, so the table is rebuilt once.
+ */
+const siteIdRequired = db.prepare('PRAGMA table_info(issues)').all().find((c) => c.name === 'site_id')?.notnull;
+if (siteIdRequired) {
+  const columns = [
+    'id', 'site_id', 'batch_id', 'title', 'description', 'type', 'category', 'severity', 'status',
+    'reporter_id', 'assignee_id', 'due_date', 'created_at', 'updated_at', 'resolved_at', 'closed_at',
+    'deleted_at', 'deleted_by',
+  ].join(', ');
+
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec(`
+    BEGIN;
+    CREATE TABLE issues_rebuilt (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      site_id      INTEGER REFERENCES sites(id) ON DELETE CASCADE,
+      batch_id     INTEGER REFERENCES batches(id) ON DELETE SET NULL,
+      title        TEXT NOT NULL,
+      description  TEXT NOT NULL DEFAULT '',
+      type         TEXT NOT NULL DEFAULT 'technical',
+      category     TEXT NOT NULL DEFAULT 'other',
+      severity     TEXT NOT NULL DEFAULT 'medium',
+      status       TEXT NOT NULL DEFAULT 'open',
+      reporter_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      assignee_id  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+      due_date     TEXT,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at  TEXT,
+      closed_at    TEXT,
+      deleted_at   TEXT,
+      deleted_by   INTEGER REFERENCES users(id) ON DELETE SET NULL
+    );
+    INSERT INTO issues_rebuilt (${columns}) SELECT ${columns} FROM issues;
+    DROP TABLE issues;
+    ALTER TABLE issues_rebuilt RENAME TO issues;
+    CREATE INDEX idx_issues_site ON issues(site_id);
+    CREATE INDEX idx_issues_status ON issues(status);
+    CREATE INDEX idx_issues_batch ON issues(batch_id);
+    CREATE INDEX idx_issues_deleted ON issues(deleted_at);
+    CREATE INDEX idx_issues_type ON issues(type);
+    COMMIT;
+  `);
+  db.exec('PRAGMA foreign_keys = ON');
+}
 
 const userColumns = db.prepare('PRAGMA table_info(users)').all().map((c) => c.name);
 if (!userColumns.includes('username')) {

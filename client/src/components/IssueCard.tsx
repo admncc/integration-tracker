@@ -4,6 +4,7 @@ import { ApiError, api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Attachment, Comment, Issue, IssueStatus, User } from '../lib/types';
 import { ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY } from '@shared/domain.js';
+import { FILE_GLYPH, MAX_UPLOAD_BYTES, fileKind, formatBytes, isInlineType } from '@shared/files.js';
 import { Badge, Button, InlineSelect, Timestamp, relativeTime, type Tone } from './ui';
 
 /** Mirrors the server-side transition table so the UI never offers a rejected move. */
@@ -144,10 +145,17 @@ export default function IssueCard({
             <Badge tone={status.tone}>{status.label}</Badge>
             <Badge tone={type.tone}>{type.label}</Badge>
             <Badge tone={severity.tone}>{severity.label}</Badge>
-            {showDomain && issue.domain && (
-              <Link to={`/sites/${issue.site_id}`} className="text-xs font-medium text-ink-soft hover:text-brand hover:underline">
-                {issue.domain}
-              </Link>
+            {issue.site_id == null ? (
+              <Badge tone="purple" title="Applies to the whole network, ticked off once">
+                Network-wide
+              </Badge>
+            ) : (
+              showDomain &&
+              issue.domain && (
+                <Link to={`/sites/${issue.site_id}`} className="text-xs font-medium text-ink-soft hover:text-brand hover:underline">
+                  {issue.domain}
+                </Link>
+              )
             )}
             {issue.batch_id && (
               <Link to={`/issues?status=all&batch_id=${issue.batch_id}`} className="text-xs text-ink-faint hover:text-brand" title="Same finding across several domains">
@@ -315,37 +323,82 @@ function Gallery({ attachments, onDeleted }: { attachments: Attachment[]; onDele
   const { user } = useSession();
   const [zoom, setZoom] = useState<Attachment | null>(null);
 
+  // Pictures are worth showing; a log file or an ads.txt snippet is worth
+  // downloading, so the two get different treatment in the same list.
+  const images = attachments.filter((a) => isInlineType(a.mime));
+  const files = attachments.filter((a) => !isInlineType(a.mime));
+
+  function canRemove(attachment: Attachment) {
+    return user?.role === 'admin' || user?.id === attachment.uploader_id;
+  }
+
+  async function remove(attachment: Attachment) {
+    await api.del(`/issues/attachments/${attachment.id}`);
+    onDeleted();
+  }
+
   return (
     <>
-      <div className="flex flex-wrap gap-2">
-        {attachments.map((attachment) => (
-          <figure key={attachment.id} className="group relative">
-            <button onClick={() => setZoom(attachment)} className="block">
-              <img
-                src={`/api/issues/attachments/${attachment.id}/raw`}
-                alt={attachment.filename}
-                loading="lazy"
-                className="size-24 rounded-lg border border-line object-cover transition group-hover:brightness-95"
-              />
-            </button>
-            {(user?.role === 'admin' || user?.id === attachment.uploader_id) && (
-              <button
-                onClick={async () => {
-                  await api.del(`/issues/attachments/${attachment.id}`);
-                  onDeleted();
-                }}
-                className="absolute -top-1.5 -right-1.5 hidden size-5 place-items-center rounded-full bg-tone-red text-xs text-white group-hover:grid"
-                title="Delete image"
-              >
-                ✕
+      {images.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {images.map((attachment) => (
+            <figure key={attachment.id} className="group relative">
+              <button onClick={() => setZoom(attachment)} className="block">
+                <img
+                  src={`/api/issues/attachments/${attachment.id}/raw`}
+                  alt={attachment.filename}
+                  loading="lazy"
+                  className="size-24 rounded-lg border border-line object-cover transition group-hover:brightness-95"
+                />
               </button>
-            )}
-            <figcaption className="mt-1 w-24 truncate text-[11px] text-ink-faint" title={attachment.filename}>
-              {attachment.filename}
-            </figcaption>
-          </figure>
-        ))}
-      </div>
+              {canRemove(attachment) && (
+                <button
+                  onClick={() => remove(attachment)}
+                  className="absolute -top-1.5 -right-1.5 hidden size-5 place-items-center rounded-full bg-tone-red text-xs text-white group-hover:grid"
+                  title="Delete image"
+                  aria-label={`Delete ${attachment.filename}`}
+                >
+                  ✕
+                </button>
+              )}
+              <figcaption className="mt-1 w-24 truncate text-[11px] text-ink-faint" title={attachment.filename}>
+                {attachment.filename}
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
+
+      {files.length > 0 && (
+        <ul className={`flex flex-wrap gap-2 ${images.length > 0 ? 'mt-2' : ''}`}>
+          {files.map((attachment) => (
+            <li key={attachment.id} className="group flex max-w-full items-center gap-2 rounded-lg border border-line bg-surface px-2.5 py-1.5">
+              <span aria-hidden className="text-base leading-none">
+                {FILE_GLYPH[fileKind(attachment.mime, attachment.filename) as keyof typeof FILE_GLYPH] ?? FILE_GLYPH.file}
+              </span>
+              <a
+                href={`/api/issues/attachments/${attachment.id}/raw`}
+                download={attachment.filename}
+                className="min-w-0 truncate text-xs font-medium hover:text-brand hover:underline"
+                title={`${attachment.filename} - download`}
+              >
+                {attachment.filename}
+              </a>
+              <span className="shrink-0 text-[11px] text-ink-faint tabular-nums">{formatBytes(attachment.size)}</span>
+              {canRemove(attachment) && (
+                <button
+                  onClick={() => remove(attachment)}
+                  className="shrink-0 text-ink-faint transition hover:text-tone-red"
+                  title="Delete file"
+                  aria-label={`Delete ${attachment.filename}`}
+                >
+                  ✕
+                </button>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
 
       {zoom && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/80 p-6" onClick={() => setZoom(null)}>
@@ -378,15 +431,22 @@ function Thread({
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     if (!body.trim() && files.length === 0) return;
+
+    const tooBig = files.find((file) => file.size > MAX_UPLOAD_BYTES);
+    if (tooBig) {
+      setError(`${tooBig.name} is ${formatBytes(tooBig.size)} - the limit is ${formatBytes(MAX_UPLOAD_BYTES)}.`);
+      return;
+    }
+
     setBusy(true);
     setError('');
     try {
       const { comment } = await api.post<{ comment: Comment }>(`/issues/${issueId}/comments`, {
-        body: body.trim() || '(image only)',
+        body: body.trim() || '(attachment only)',
       });
       const uploaded: Attachment[] = [];
       for (const file of files) {
-        uploaded.push(await uploadImage(issueId, file, comment.id));
+        uploaded.push(await uploadAttachment(issueId, file, comment.id));
       }
       onPosted(comment, uploaded);
       setBody('');
@@ -437,12 +497,11 @@ function Thread({
           <input
             ref={fileInput}
             type="file"
-            accept="image/png,image/jpeg,image/gif,image/webp,image/avif"
             multiple
             onChange={(event) => setFiles([...(event.target.files ?? [])])}
             className="text-xs text-ink-soft file:mr-2 file:rounded-lg file:border file:border-line-strong file:bg-raised file:px-2 file:py-1 file:text-xs"
           />
-          {files.length > 0 && <span className="text-xs text-ink-faint">{files.length} image(s) attached</span>}
+          {files.length > 0 && <span className="text-xs text-ink-faint">{files.length} file(s) attached</span>}
           <Button type="submit" size="sm" variant="primary" className="ml-auto" disabled={busy || (!body.trim() && files.length === 0)}>
             {busy ? 'Posting...' : 'Comment'}
           </Button>
@@ -453,13 +512,21 @@ function Thread({
   );
 }
 
-/** One request per image: the raw file is the body, the name rides in a header. */
-export async function uploadImage(issueId: number, file: File, commentId?: number): Promise<Attachment> {
+/**
+ * One request per file: the raw bytes are the body, the name rides in a header.
+ * Any type goes - screenshots, but also ads.txt snippets, tag exports and logs.
+ */
+export async function uploadAttachment(issueId: number, file: File, commentId?: number): Promise<Attachment> {
+  if (file.size > MAX_UPLOAD_BYTES) {
+    throw new Error(`${file.name} is ${formatBytes(file.size)} - the limit is ${formatBytes(MAX_UPLOAD_BYTES)}.`);
+  }
+
   const query = commentId ? `?comment_id=${commentId}` : '';
   const response = await fetch(`/api/issues/${issueId}/attachments${query}`, {
     method: 'POST',
     credentials: 'same-origin',
-    headers: { 'Content-Type': file.type, 'X-Filename': encodeURIComponent(file.name) },
+    // A browser leaves file.type empty for extensions it does not know.
+    headers: { 'Content-Type': file.type || 'application/octet-stream', 'X-Filename': encodeURIComponent(file.name) },
     body: file,
   });
   const payload = await response.json().catch(() => ({}));

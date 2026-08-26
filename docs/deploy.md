@@ -168,7 +168,7 @@ everything you have edited alone. Take a backup before an update anyway.
 | `node -v` shows v18 or v20 | NodeSource step did not take; the app will not start |
 | Service restarts in a loop | `journalctl -u integration-tracker -n 50` - usually a bad `.env` line or `data/` not writable by `tracker` |
 | 502 from nginx | the service is down, or `PORT` in `.env` does not match `proxy_pass` |
-| 413 when uploading a screenshot | `client_max_body_size` missing from the nginx server block |
+| 413 when uploading a file | `client_max_body_size` missing from the nginx server block, or below the 25 MB app limit |
 | Sign-in says "too many attempts" for everyone | `TRUST_PROXY=1` missing from `.env` |
 | Sign-in works but every page is empty | old build: the session cookie was dropped over plain HTTP. `git pull` and rebuild |
 | Exchange rate stuck at 1.08 | the server cannot reach `ecb.europa.eu`; set the rate by hand under Settings |

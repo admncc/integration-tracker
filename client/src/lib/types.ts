@@ -62,7 +62,8 @@ export interface SiteMessage {
 
 export interface Issue {
   id: number;
-  site_id: number;
+  /** null for a network-wide issue: it belongs to no single domain. */
+  site_id: number | null;
   batch_id: number | null;
   title: string;
   description: string;

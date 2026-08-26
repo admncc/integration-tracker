@@ -68,9 +68,15 @@ export default function IssueDetail() {
   return (
     <div className="space-y-4">
       <div>
-        <Link to={`/sites/${issue.site_id}`} className="text-xs text-ink-faint hover:text-brand">
-          ← {issue.domain}
-        </Link>
+        {issue.site_id == null ? (
+          <Link to="/sites" className="text-xs text-ink-faint hover:text-brand">
+            ← Network-wide, applies to every site
+          </Link>
+        ) : (
+          <Link to={`/sites/${issue.site_id}`} className="text-xs text-ink-faint hover:text-brand">
+            ← {issue.domain}
+          </Link>
+        )}
         <h1 className="text-lg font-semibold">
           #{issue.id} {issue.title}
         </h1>

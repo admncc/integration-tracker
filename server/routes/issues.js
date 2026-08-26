@@ -3,8 +3,8 @@ import { createReadStream } from 'node:fs';
 import { z } from 'zod';
 import { db, logActivity } from '../lib/db.js';
 import { requireAuth } from '../lib/auth.js';
-import { ALLOWED_MIME, MAX_UPLOAD_BYTES, removeUpload, safeFilename, storeUpload, uploadPath } from '../lib/uploads.js';
-import { ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, OPEN_ISSUE_STATUSES, SEVERITY } from '../../shared/domain.js';
+import { MAX_UPLOAD_BYTES, isInlineType, removeUpload, safeFilename, storeUpload, uploadPath } from '../lib/uploads.js';
+import { INACTIVE_PRIORITY, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, OPEN_ISSUE_STATUSES, SEVERITY } from '../../shared/domain.js';
 import { toCsv } from '../lib/sheet.js';
 
 export const issuesRouter = Router();
@@ -80,8 +80,21 @@ function buildIssueFilter(query) {
     }
   }
 
+  /*
+   * A network-wide issue belongs to no domain, so it is addressed by the word
+   * rather than by an id: site_id=network. Without this it was unreachable, as
+   * `i.site_id = ?` never matches NULL.
+   */
+  if (query.site_id === 'network') {
+    where.push('i.site_id IS NULL');
+  } else if (query.site_id === 'per_site') {
+    where.push('i.site_id IS NOT NULL');
+  } else if (query.site_id) {
+    where.push('i.site_id = ?');
+    params.push(query.site_id);
+  }
+
   for (const [param, column] of [
-    ['site_id', 'i.site_id'],
     ['type', 'i.type'],
     ['severity', 'i.severity'],
     ['category', 'i.category'],
@@ -96,7 +109,8 @@ function buildIssueFilter(query) {
 
   if (query.q) {
     // Without escaping, a search for "%" or "_" matched every row.
-    where.push(`(i.title LIKE ? ESCAPE '\\' OR i.description LIKE ? ESCAPE '\\' OR s.domain LIKE ? ESCAPE '\\')`);
+    // COALESCE, because a NULL domain made the whole OR chain NULL for network issues.
+    where.push(`(i.title LIKE ? ESCAPE '\\' OR i.description LIKE ? ESCAPE '\\' OR COALESCE(s.domain, '') LIKE ? ESCAPE '\\')`);
     const like = `%${String(query.q).replace(/[\\%_]/g, (ch) => `\\${ch}`)}%`;
     params.push(like, like, like);
   }
@@ -114,14 +128,14 @@ issuesRouter.get('/', (req, res) => {
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comment_count,
               (SELECT COUNT(*) FROM activity ac WHERE ac.issue_id = i.id AND ac.field = 'status' AND ac.new_value = 'ready_for_qa') AS qa_rounds
          FROM issues i
-         JOIN sites s ON s.id = i.site_id
+         LEFT JOIN sites s ON s.id = i.site_id
          LEFT JOIN users r ON r.id = i.reporter_id
          LEFT JOIN users a ON a.id = i.assignee_id
          LEFT JOIN users d ON d.id = i.deleted_by
         WHERE ${where.join(' AND ')}
         ORDER BY CASE i.status WHEN 'open' THEN 0 WHEN 'in_progress' THEN 1 WHEN 'ready_for_qa' THEN 2 WHEN 'verified' THEN 3 ELSE 4 END,
                  CASE i.severity WHEN 'blocker' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
-                 s.priority ASC, i.id DESC
+                 COALESCE(s.priority, 0) ASC, i.id DESC
         LIMIT ${LIST_LIMIT}`
     )
     .all(...params);
@@ -129,7 +143,7 @@ issuesRouter.get('/', (req, res) => {
   // The cap used to be invisible: the header printed the truncated length as fact
   // while the dashboard counted the real total.
   const total = db
-    .prepare(`SELECT COUNT(*) AS n FROM issues i JOIN sites s ON s.id = i.site_id WHERE ${where.join(' AND ')}`)
+    .prepare(`SELECT COUNT(*) AS n FROM issues i LEFT JOIN sites s ON s.id = i.site_id WHERE ${where.join(' AND ')}`)
     .get(...params).n;
 
   res.json({ issues, total, limit: LIST_LIMIT, truncated: total > issues.length });
@@ -144,40 +158,85 @@ issuesRouter.get('/export.csv', (req, res) => {
 
   const rows = db
     .prepare(
-      `SELECT i.id, s.domain, s.priority, i.type, i.category, i.severity, i.status, i.title,
+      `SELECT i.id, i.site_id, s.domain, s.priority, i.type, i.category, i.severity, i.status, i.title,
               r.name AS reporter, a.name AS assignee, i.due_date, i.created_at, i.updated_at, i.closed_at,
               i.deleted_at, d.name AS deleted_by,
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comments,
-              (SELECT COUNT(*) FROM attachments at WHERE at.issue_id = i.id) AS images
+              (SELECT COUNT(*) FROM attachments at WHERE at.issue_id = i.id) AS attachments
          FROM issues i
-         JOIN sites s ON s.id = i.site_id
+         LEFT JOIN sites s ON s.id = i.site_id
          LEFT JOIN users r ON r.id = i.reporter_id
          LEFT JOIN users a ON a.id = i.assignee_id
          LEFT JOIN users d ON d.id = i.deleted_by
         WHERE ${where.join(' AND ')}
-        ORDER BY s.priority, s.domain, i.id`
+        ORDER BY COALESCE(s.priority, 0), COALESCE(s.domain, ''), i.id`
     )
     .all(...params);
 
   const header = [
     'ID', 'Domain', 'Prio', 'Type', 'Category', 'Severity', 'Status', 'Title',
     'Raised by', 'Assignee', 'Due', 'Created', 'Updated', 'Closed', 'Deleted', 'Deleted by',
-    'Comments', 'Images',
+    'Comments', 'Attachments',
   ];
   const body = rows.map((row) => [
-    row.id, row.domain, row.priority,
+    row.id, row.domain ?? 'All domains (network-wide)', row.site_id == null ? '' : row.priority,
     ISSUE_TYPE[row.type]?.label ?? row.type,
     ISSUE_CATEGORY[row.category] ?? row.category,
     SEVERITY[row.severity]?.label ?? row.severity,
     ISSUE_STATUS[row.status]?.label ?? row.status,
     row.title, row.reporter ?? '', row.assignee ?? '', row.due_date ?? '',
     row.created_at, row.updated_at, row.closed_at ?? '', row.deleted_at ?? '', row.deleted_by ?? '',
-    row.comments, row.images,
+    row.comments, row.attachments,
   ]);
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="issues-${req.query.status ?? 'open'}.csv"`);
   res.send(toCsv([header, ...body]));
+});
+
+/**
+ * What the band above the sites table shows. Two different things live there:
+ *
+ *  - network-wide issues: one row, no domain, ticked off once (an ads.txt line
+ *    that is identical everywhere, an MCM account change);
+ *  - per-domain rollouts: one issue per active domain under a shared batch, so
+ *    the same task has to be ticked off on every single site.
+ */
+issuesRouter.get('/network', (req, res) => {
+  const openList = OPEN_ISSUE_STATUSES.map(() => '?').join(',');
+
+  const issues = db
+    .prepare(
+      `SELECT i.*, r.name AS reporter_name, a.name AS assignee_name,
+              (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comment_count
+         FROM issues i
+         LEFT JOIN users r ON r.id = i.reporter_id
+         LEFT JOIN users a ON a.id = i.assignee_id
+        WHERE i.site_id IS NULL AND i.deleted_at IS NULL
+        ORDER BY CASE WHEN i.status IN (${openList}) THEN 0 ELSE 1 END,
+                 CASE i.severity WHEN 'blocker' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,
+                 i.id DESC
+        LIMIT 50`
+    )
+    .all(...OPEN_ISSUE_STATUSES);
+
+  const rollouts = db
+    .prepare(
+      `SELECT b.id, b.title, b.created_at, u.name AS created_by_name,
+              COUNT(i.id) AS total,
+              SUM(CASE WHEN i.status IN (${openList}) THEN 1 ELSE 0 END) AS still_open
+         FROM batches b
+         JOIN issues i ON i.batch_id = b.id AND i.deleted_at IS NULL
+         LEFT JOIN users u ON u.id = b.created_by
+        GROUP BY b.id
+       HAVING total > 1 AND still_open > 0
+        ORDER BY b.id DESC
+        LIMIT 20`
+    )
+    .all(...OPEN_ISSUE_STATUSES)
+    .map((row) => ({ ...row, done: row.total - row.still_open }));
+
+  res.json({ issues, rollouts });
 });
 
 issuesRouter.get('/:id', (req, res) => {
@@ -187,7 +246,7 @@ issuesRouter.get('/:id', (req, res) => {
               (SELECT COUNT(*) FROM comments c WHERE c.issue_id = i.id) AS comment_count,
               (SELECT COUNT(*) FROM activity ac WHERE ac.issue_id = i.id AND ac.field = 'status' AND ac.new_value = 'ready_for_qa') AS qa_rounds
          FROM issues i
-         JOIN sites s ON s.id = i.site_id
+         LEFT JOIN sites s ON s.id = i.site_id
          LEFT JOIN users r ON r.id = i.reporter_id
          LEFT JOIN users a ON a.id = i.assignee_id
          LEFT JOIN users d ON d.id = i.deleted_by
@@ -216,7 +275,7 @@ issuesRouter.get('/:id', (req, res) => {
   const siblings = issue.batch_id
     ? db
         .prepare(
-          `SELECT i.id, i.status, s.domain FROM issues i JOIN sites s ON s.id = i.site_id
+          `SELECT i.id, i.status, s.domain FROM issues i LEFT JOIN sites s ON s.id = i.site_id
             WHERE i.batch_id = ? AND i.id != ? AND i.deleted_at IS NULL ORDER BY s.priority, s.domain`
         )
         .all(issue.batch_id, issue.id)
@@ -233,17 +292,27 @@ issuesRouter.get('/:id', (req, res) => {
   res.json({ issue, comments, activity, siblings, attachments });
 });
 
+/**
+ * One issue on one domain, or - with site_id: null - one network-wide issue
+ * that is ticked off once for the whole network.
+ */
 issuesRouter.post('/', (req, res) => {
-  const parsed = z.object({ site_id: z.coerce.number().int().positive(), ...baseIssue }).safeParse(req.body);
+  const parsed = z
+    .object({ site_id: z.union([z.null(), z.coerce.number().int().positive()]).default(null), ...baseIssue })
+    .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
 
-  const site = db.prepare('SELECT id, domain FROM sites WHERE id = ?').get(parsed.data.site_id);
-  if (!site) return res.status(404).json({ error: 'Site not found' });
+  let domain = null;
+  if (parsed.data.site_id != null) {
+    const site = db.prepare('SELECT id, domain FROM sites WHERE id = ?').get(parsed.data.site_id);
+    if (!site) return res.status(404).json({ error: 'Site not found' });
+    domain = site.domain;
+  }
 
   const badAssignee = assigneeError(parsed.data.assignee_id);
   if (badAssignee) return res.status(400).json({ error: badAssignee });
 
-  const issue = insertIssue({ ...parsed.data, reporter_id: req.user.id, batch_id: null }, req.user.id, site.domain);
+  const issue = insertIssue({ ...parsed.data, reporter_id: req.user.id, batch_id: null }, req.user.id, domain);
   res.status(201).json({ issue });
 });
 
@@ -254,16 +323,35 @@ issuesRouter.post('/', (req, res) => {
  */
 issuesRouter.post('/bulk', (req, res) => {
   const parsed = z
-    .object({ site_ids: z.array(z.coerce.number().int().positive()).min(1).max(500), ...baseIssue })
+    .object({
+      site_ids: z.array(z.coerce.number().int().positive()).max(500).optional(),
+      // "For each domain": the server resolves the list, so the count is the
+      // real one at the moment of creation rather than whatever a stale table
+      // in the browser happened to show.
+      all_active: z.boolean().default(false),
+      ...baseIssue,
+    })
     .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
 
-  const { site_ids, ...fields } = parsed.data;
+  const { site_ids, all_active, ...fields } = parsed.data;
 
   const badAssignee = assigneeError(fields.assignee_id);
   if (badAssignee) return res.status(400).json({ error: badAssignee });
 
-  const uniqueIds = [...new Set(site_ids)];
+  let uniqueIds;
+  if (all_active) {
+    // Priority 99 is the "not active" marker, so those domains stay out of it.
+    uniqueIds = db
+      .prepare(`SELECT id FROM sites WHERE archived = 0 AND priority < ${INACTIVE_PRIORITY} ORDER BY priority, domain`)
+      .all()
+      .map((row) => row.id);
+    if (!uniqueIds.length) return res.status(400).json({ error: 'There is no active domain to raise this on' });
+  } else {
+    if (!site_ids?.length) return res.status(400).json({ error: 'Pick at least one domain' });
+    uniqueIds = [...new Set(site_ids)];
+  }
+
   const sites = db
     .prepare(`SELECT id, domain FROM sites WHERE id IN (${uniqueIds.map(() => '?').join(',')})`)
     .all(...uniqueIds);
@@ -375,7 +463,9 @@ issuesRouter.post('/:id/comments', (req, res) => {
  */
 issuesRouter.post(
   '/:id/attachments',
-  express.raw({ type: ALLOWED_MIME, limit: MAX_UPLOAD_BYTES }),
+  // Any type: a QA finding travels with a screenshot as often as with a log
+  // extract, a CSV of tag ids or the ads.txt in question.
+  express.raw({ type: () => true, limit: MAX_UPLOAD_BYTES }),
   (req, res) => {
     const id = Number(req.params.id);
     const issue = db.prepare('SELECT * FROM issues WHERE id = ?').get(id);
@@ -383,12 +473,9 @@ issuesRouter.post(
 
     if (issue.deleted_at) return res.status(409).json({ error: 'This issue is deleted. Restore it first.' });
 
-    const mime = String(req.headers['content-type'] ?? '').split(';')[0].trim();
-    if (!ALLOWED_MIME.includes(mime)) {
-      return res.status(415).json({ error: `Only images are accepted (${ALLOWED_MIME.join(', ')})` });
-    }
+    const mime = String(req.headers['content-type'] ?? '').split(';')[0].trim() || 'application/octet-stream';
     if (!Buffer.isBuffer(req.body) || req.body.length === 0) {
-      return res.status(400).json({ error: 'Empty upload' });
+      return res.status(400).json({ error: 'Empty file' });
     }
 
     let commentId = null;
@@ -407,9 +494,9 @@ issuesRouter.post(
     }
     let key;
     try {
-      key = storeUpload(req.body, mime);
+      key = storeUpload(req.body, mime, filename);
     } catch (err) {
-      return res.status(415).json({ error: err.message });
+      return res.status(500).json({ error: `Could not store the file: ${err.message}` });
     }
 
     const attachmentId = Number(
@@ -437,18 +524,26 @@ issuesRouter.get('/attachments/:attachmentId/raw', (req, res) => {
   const attachment = db.prepare('SELECT * FROM attachments WHERE id = ?').get(Number(req.params.attachmentId));
   if (!attachment) return res.status(404).json({ error: 'Attachment not found' });
 
-  res.setHeader('Content-Type', attachment.mime);
+  /*
+   * Only a raster image may render in place. Anything else - an SVG, an HTML
+   * file, a PDF - is sent as a download, so an uploaded file can never execute
+   * as markup on our own origin.
+   *
+   * filename* carries the real name; the plain filename is the ASCII fallback,
+   * otherwise a saved file ends up called "mein%20sch%C3%B6nes%20bild.png".
+   */
+  const inline = isInlineType(attachment.mime);
+  res.setHeader('Content-Type', inline ? attachment.mime : 'application/octet-stream');
   res.setHeader('Content-Length', attachment.size);
   res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
-  // Never render an upload inline as markup, whatever the stored mime claims.
-  // filename* carries the real name; the plain filename is the ASCII fallback,
-  // otherwise a saved file ends up called "mein%20sch%C3%B6nes%20bild.png".
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+
   const ascii = attachment.filename.replace(/[^\x20-\x7e]/g, '_').replace(/"/g, '');
   res.setHeader(
     'Content-Disposition',
-    `inline; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`
+    `${inline ? 'inline' : 'attachment'}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(attachment.filename)}`
   );
-  res.setHeader('X-Content-Type-Options', 'nosniff');
 
   createReadStream(uploadPath(attachment.storage_key))
     .on('error', () => res.status(404).end())
@@ -516,7 +611,7 @@ function issueRow(id) {
     .prepare(
       `SELECT i.*, s.domain, r.name AS reporter_name, a.name AS assignee_name, d.name AS deleted_by_name
          FROM issues i
-         JOIN sites s ON s.id = i.site_id
+         LEFT JOIN sites s ON s.id = i.site_id
          LEFT JOIN users r ON r.id = i.reporter_id
          LEFT JOIN users a ON a.id = i.assignee_id
          LEFT JOIN users d ON d.id = i.deleted_by
@@ -537,7 +632,7 @@ function insertIssue(fields, actorId, domain) {
 }
 
 /** Only the genuinely nullable columns accept an empty value as NULL. */
-const NULLABLE_FIELDS = new Set(['assignee_id', 'due_date', 'batch_id']);
+const NULLABLE_FIELDS = new Set(['site_id', 'assignee_id', 'due_date', 'batch_id']);
 
 function normalise(value, field) {
   if (typeof value === 'boolean') return value ? 1 : 0;

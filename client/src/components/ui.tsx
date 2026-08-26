@@ -23,9 +23,22 @@ export const TONE_TEXT: Record<Tone, string> = {
   red: 'text-tone-red', purple: 'text-tone-purple', slate: 'text-tone-slate', muted: 'text-tone-muted',
 };
 
-export function Badge({ tone = 'slate', children, className = '' }: { tone?: Tone; children: ReactNode; className?: string }) {
+export function Badge({
+  tone = 'slate',
+  children,
+  className = '',
+  title,
+}: {
+  tone?: Tone;
+  children: ReactNode;
+  className?: string;
+  title?: string;
+}) {
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${TONE_CLASS[tone]} ${className}`}>
+    <span
+      title={title}
+      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ${TONE_CLASS[tone]} ${className}`}
+    >
       {children}
     </span>
   );

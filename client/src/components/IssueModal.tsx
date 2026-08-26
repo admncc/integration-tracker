@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import type { Issue, Site, User } from '../lib/types';
 import { ISSUE_CATEGORY, ISSUE_TYPE, REVENUE_CATEGORIES, SEVERITY } from '@shared/domain.js';
+import { FILE_GLYPH, fileKind, formatBytes, isInlineType } from '@shared/files.js';
 import { Button, Field, Modal } from './ui';
-import { uploadImage } from './IssueCard';
+import { uploadAttachment } from './IssueCard';
 
 const CATEGORIES = Object.entries(ISSUE_CATEGORY) as [string, string][];
 const SEVERITIES = Object.entries(SEVERITY) as [string, { label: string }][];
@@ -18,6 +19,8 @@ export default function IssueModal({
   siteIds: preselected,
   domains,
   selectableSites,
+  network = false,
+  activeSiteCount = 0,
   onClose,
   onCreated,
 }: {
@@ -25,11 +28,21 @@ export default function IssueModal({
   domains: string[];
   /** When given, the dialog lets the reporter pick the affected domains itself. */
   selectableSites?: Site[];
+  /** Opens the dialog in network mode, where the two network scopes are offered. */
+  network?: boolean;
+  /** How many domains "For each domain" would hit; prio 99 is not among them. */
+  activeSiteCount?: number;
   onClose: () => void;
-  /** `uploadErrors` is non-empty when the issues exist but a screenshot did not attach. */
+  /** `uploadErrors` is non-empty when the issues exist but a file did not attach. */
   onCreated: (count: number, issue?: Issue, uploadErrors?: string[]) => void;
 }) {
   const [picked, setPicked] = useState<number[]>(preselected);
+  /*
+   * The two things a network issue can mean, and they are genuinely different:
+   * "network" is one row that is ticked off once, "each_domain" is one row per
+   * active domain, so the work has to be signed off on every single site.
+   */
+  const [scope, setScope] = useState<'network' | 'each_domain'>('network');
   const [siteSearch, setSiteSearch] = useState('');
   const siteIds = selectableSites ? picked : preselected;
   const bulk = siteIds.length > 1;
@@ -54,7 +67,7 @@ export default function IssueModal({
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
-    if (siteIds.length === 0) {
+    if (!network && siteIds.length === 0) {
       setError('Pick at least one domain');
       return;
     }
@@ -67,12 +80,21 @@ export default function IssueModal({
     };
     try {
       /*
-       * The issues are created first and the screenshots follow, so an upload
+       * The issues are created first and the files follow, so an upload
        * failure must not leave the dialog open over issues that already exist -
        * pressing Create again then made a second set.
        */
       let created: Issue[] = [];
-      if (bulk) {
+      if (network && scope === 'network') {
+        // site_id: null is what makes it network-wide - no domain, ticked once.
+        const result = await api.post<{ issue: Issue }>('/issues', { ...payload, site_id: null });
+        created = [result.issue];
+      } else if (network) {
+        // The server resolves "every active domain", so the count is the real
+        // one at that moment and not whatever the table last showed.
+        const result = await api.post<{ created: number; issues: Issue[] }>('/issues/bulk', { ...payload, all_active: true });
+        created = result.issues;
+      } else if (bulk) {
         const result = await api.post<{ created: number; issues: Issue[] }>('/issues/bulk', { ...payload, site_ids: siteIds });
         created = result.issues;
       } else {
@@ -82,10 +104,10 @@ export default function IssueModal({
 
       const failed: string[] = [];
       for (const issue of created) {
-        // The same screenshot is attached to every issue in the batch.
+        // The same file is attached to every issue in the batch.
         for (const file of files) {
           try {
-            await uploadImage(issue.id, file);
+            await uploadAttachment(issue.id, file);
           } catch (err) {
             failed.push(`${file.name}: ${err instanceof Error ? err.message : 'upload failed'}`);
           }
@@ -103,7 +125,9 @@ export default function IssueModal({
   return (
     <Modal
       title={
-        selectableSites
+        network
+          ? 'New network-wide issue'
+          : selectableSites
           ? 'New issue'
           : bulk
             ? `New issue on ${siteIds.length} sites`
@@ -113,7 +137,46 @@ export default function IssueModal({
       wide
     >
       <form onSubmit={submit} className="space-y-3">
-        {selectableSites && (
+        {network && (
+          <fieldset className="space-y-1">
+            <legend className="text-xs font-medium text-ink-soft">Scope</legend>
+            <div className="grid gap-2 sm:grid-cols-2">
+              {([
+                {
+                  value: 'network' as const,
+                  label: 'Network-wide, ticked off once',
+                  hint: 'One item in the band above the sites table. Nothing appears on the individual domains.',
+                },
+                {
+                  value: 'each_domain' as const,
+                  label: 'For each domain',
+                  hint: `Creates the same item on all ${activeSiteCount || ''} active domains (priority 99 excluded), to be ticked off on every one of them.`,
+                },
+              ]).map((option) => (
+                <label
+                  key={option.value}
+                  className={`flex cursor-pointer items-start gap-2 rounded-lg border px-3 py-2 text-sm transition ${
+                    scope === option.value ? 'border-brand bg-brand-soft' : 'border-line hover:bg-raised'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="issue-scope"
+                    className="mt-1"
+                    checked={scope === option.value}
+                    onChange={() => setScope(option.value)}
+                  />
+                  <span>
+                    <span className="block font-medium">{option.label}</span>
+                    <span className="block text-xs text-ink-soft">{option.hint}</span>
+                  </span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        )}
+
+        {!network && selectableSites && (
           <Field label="Affected domains" hint="Tick every domain showing this problem - each one becomes its own tickable item.">
             <div className="space-y-2">
               <input
@@ -146,7 +209,7 @@ export default function IssueModal({
           </Field>
         )}
 
-        {bulk && !selectableSites && (
+        {!network && bulk && !selectableSites && (
           <div className="rounded-lg bg-brand-soft px-3 py-2 text-xs text-brand-ink">
             One issue will be created per domain and grouped under a shared batch, so each site can be fixed and ticked off on its own:{' '}
             <span className="font-medium">{domains.join(', ')}</span>
@@ -238,12 +301,11 @@ export default function IssueModal({
           </Field>
         </div>
 
-        <Field label="Screenshots" hint="PNG, JPEG, GIF, WebP or AVIF - up to 10 MB each.">
+        <Field label="Attachments" hint="Any file type - screenshots, ads.txt snippets, tag exports, logs. Up to 25 MB each.">
           <div className="flex flex-wrap items-center gap-2">
             <input
               ref={fileInput}
               type="file"
-              accept="image/png,image/jpeg,image/gif,image/webp,image/avif"
               multiple
               onChange={(event) => setFiles([...(event.target.files ?? [])])}
               className="text-xs text-ink-soft file:mr-2 file:rounded-lg file:border file:border-line-strong file:bg-raised file:px-2 file:py-1 file:text-xs"
@@ -264,18 +326,7 @@ export default function IssueModal({
               </>
             )}
           </div>
-          {files.length > 0 && (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {files.map((file) => (
-                <img
-                  key={file.name + file.size}
-                  src={URL.createObjectURL(file)}
-                  alt={file.name}
-                  className="size-16 rounded border border-line object-cover"
-                />
-              ))}
-            </div>
-          )}
+          {files.length > 0 && <FilePreview files={files} />}
         </Field>
 
         {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{error}</p>}
@@ -283,10 +334,57 @@ export default function IssueModal({
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" onClick={onClose}>Cancel</Button>
           <Button type="submit" variant="primary" disabled={busy}>
-            {busy ? 'Creating...' : bulk ? `Create ${siteIds.length} issues` : 'Create issue'}
+            {busy
+              ? 'Creating...'
+              : network && scope === 'each_domain'
+                ? `Create on ${activeSiteCount || 'all'} domains`
+                : network
+                  ? 'Create network-wide issue'
+                  : bulk
+                    ? `Create ${siteIds.length} issues`
+                    : 'Create issue'}
           </Button>
         </div>
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Thumbnails for pictures, a chip for everything else. The old version fed
+ * every file to URL.createObjectURL and rendered it as an image, so a .txt
+ * attachment showed up as a broken-image icon - and the URLs were never revoked.
+ */
+function FilePreview({ files }: { files: File[] }) {
+  const [previews, setPreviews] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const urls: Record<string, string> = {};
+    for (const file of files) {
+      if (isInlineType(file.type)) urls[`${file.name}:${file.size}`] = URL.createObjectURL(file);
+    }
+    setPreviews(urls);
+    return () => Object.values(urls).forEach((url) => URL.revokeObjectURL(url));
+  }, [files]);
+
+  return (
+    <ul className="mt-2 flex flex-wrap gap-2">
+      {files.map((file) => {
+        const key = `${file.name}:${file.size}`;
+        return previews[key] ? (
+          <li key={key}>
+            <img src={previews[key]} alt={file.name} title={file.name} className="size-16 rounded border border-line object-cover" />
+          </li>
+        ) : (
+          <li key={key} className="flex max-w-56 items-center gap-2 rounded-lg border border-line bg-raised px-2.5 py-1.5">
+            <span aria-hidden className="text-base leading-none">
+              {FILE_GLYPH[fileKind(file.type, file.name) as keyof typeof FILE_GLYPH] ?? FILE_GLYPH.file}
+            </span>
+            <span className="min-w-0 truncate text-xs" title={file.name}>{file.name}</span>
+            <span className="shrink-0 text-[11px] text-ink-faint tabular-nums">{formatBytes(file.size)}</span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

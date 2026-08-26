@@ -118,7 +118,7 @@ nginx, a certificate and backups. Ready-made unit and nginx files are in
 | --- | --- | --- |
 | `PORT` | `4000` | HTTP port |
 | `DATABASE_PATH` | `data/tracker.db` | SQLite file |
-| `UPLOAD_DIR` | `data/uploads` | where screenshots are stored |
+| `UPLOAD_DIR` | `data/uploads` | where issue and comment attachments are stored |
 | `TRUST_PROXY` | unset | set to `1` behind a reverse proxy |
 | `DISABLE_FX_REFRESH` | unset | set to `1` to never call the ECB |
 | `INSECURE_COOKIES` | unset | set to `1` only to run production over plain HTTP |
@@ -135,7 +135,7 @@ server/          Express API, plain ESM, no build step
   lib/auth.js    scrypt passwords, cookie sessions, role guards
   lib/sheet.js   CSV parsing and the Google Sheet vocabulary
   lib/fx.js      ECB daily reference rate
-  lib/uploads.js screenshot storage
+  lib/uploads.js attachment storage
   routes/        auth, sites, issues, meta (stats, users, import/export)
 shared/domain.js statuses, categories, currency helpers - used by both sides
 client/          React + Vite + Tailwind

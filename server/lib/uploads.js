@@ -2,41 +2,36 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+export { MAX_UPLOAD_BYTES, formatBytes, isInlineType } from '../../shared/files.js';
+
 export const UPLOAD_DIR = process.env.UPLOAD_DIR
   ? resolve(process.env.UPLOAD_DIR)
   : resolve(process.cwd(), 'data/uploads');
 
 mkdirSync(UPLOAD_DIR, { recursive: true });
 
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+/** A short, lower-case, alphanumeric extension taken from the display name. */
+function extensionFor(filename, mime) {
+  const fromName = /\.([a-zA-Z0-9]{1,8})$/.exec(String(filename ?? ''))?.[1];
+  if (fromName) return fromName.toLowerCase();
 
-/** Screenshots are what QA actually sends; nothing else needs to be accepted. */
-const EXTENSION_BY_MIME = {
-  'image/png': 'png',
-  'image/jpeg': 'jpg',
-  'image/gif': 'gif',
-  'image/webp': 'webp',
-  'image/avif': 'avif',
-};
-
-export const ALLOWED_MIME = Object.keys(EXTENSION_BY_MIME);
+  const fromMime = String(mime ?? '').split('/')[1]?.split('+')[0];
+  return /^[a-z0-9]{1,8}$/.test(fromMime ?? '') ? fromMime : 'bin';
+}
 
 /**
  * Writes a buffer under a random key. The client-supplied filename is kept for
  * display only - it never touches the path, so it cannot escape UPLOAD_DIR.
  */
-export function storeUpload(buffer, mime) {
-  const extension = EXTENSION_BY_MIME[mime];
-  if (!extension) throw new Error(`Unsupported image type: ${mime}`);
-
-  const key = `${randomBytes(16).toString('hex')}.${extension}`;
+export function storeUpload(buffer, mime, filename) {
+  const key = `${randomBytes(16).toString('hex')}.${extensionFor(filename, mime)}`;
   writeFileSync(resolve(UPLOAD_DIR, key), buffer);
   return key;
 }
 
 export function uploadPath(key) {
   // Defence in depth: a storage key from the database should already be safe.
-  if (!/^[0-9a-f]{32}\.[a-z]{3,4}$/.test(key)) throw new Error('Invalid storage key');
+  if (!/^[0-9a-f]{32}\.[a-z0-9]{1,8}$/.test(key)) throw new Error('Invalid storage key');
   return resolve(UPLOAD_DIR, key);
 }
 
@@ -60,7 +55,7 @@ export function safeFilename(raw) {
     .replaceAll('/', '_')
     .trim();
 
-  if (name.length <= 120) return name || 'screenshot';
+  if (name.length <= 120) return name || 'attachment';
 
   // Cutting at 120 used to take the extension with it.
   const dot = name.lastIndexOf('.');

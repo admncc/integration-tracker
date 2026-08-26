@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
@@ -6,6 +6,7 @@ import type { Site, TrackStatus } from '../lib/types';
 import { APPROVAL, CMP, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
 import { Badge, Button, CurrencyToggle, Empty, Field, InlineSelect, InlineText, Modal, Spinner, type Tone } from '../components/ui';
 import IssueModal from '../components/IssueModal';
+import NetworkIssues from '../components/NetworkIssues';
 
 type FilterMap = Record<string, string>;
 type SortState = { key: string; dir: 1 | -1 };
@@ -141,7 +142,7 @@ export default function Sites() {
 
   const readOnly = (field: string) => (user?.role === 'partner' ? !PARTNER_WRITABLE.has(field) : !can('edit_site'));
 
-  useEffect(() => {
+  const reload = useCallback(() => {
     setLoading(true);
     api
       .get<{ sites: Site[] }>(`/sites${showArchived ? '?archived=1' : ''}`)
@@ -149,6 +150,8 @@ export default function Sites() {
       .catch((err) => setNotice({ tone: 'red', text: err.message }))
       .finally(() => setLoading(false));
   }, [showArchived]);
+
+  useEffect(reload, [reload]);
 
   useEffect(() => {
     if (!notice) return;
@@ -316,6 +319,8 @@ export default function Sites() {
         </div>
       </div>
 
+      <NetworkIssues sites={sites} onIssuesChanged={reload} />
+
       <div className="flex flex-wrap items-center gap-1.5 text-xs">
         {(
           [
@@ -462,7 +467,7 @@ export default function Sites() {
             );
             setBulkOpen(false);
             setSelected(new Set());
-            api.get<{ sites: Site[] }>(`/sites${showArchived ? '?archived=1' : ''}`).then((r) => setSites(r.sites));
+            reload();
           }}
         />
       )}

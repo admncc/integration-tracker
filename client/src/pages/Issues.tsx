@@ -114,6 +114,7 @@ export default function Issues() {
           <p className="text-sm text-ink-soft">
             {truncated ? `${issues.length} of ${total} shown` : `${issues.length} shown`}
             {activeSite && ` on ${activeSite.domain}`}
+            {siteId === 'network' && ' · network-wide only'}
             {params.get('batch_id') && ' · one batch'}
           </p>
         </div>
@@ -169,6 +170,8 @@ export default function Issues() {
           <span className="mb-1 block text-ink-faint">Site</span>
           <select className="field !w-auto !py-1" value={siteId ?? ''} onChange={(event) => setFilter('site_id', event.target.value)}>
             <option value="">All sites</option>
+            <option value="network">Network-wide only</option>
+            <option value="per_site">Domain issues only</option>
             {sites.map((site) => (
               <option key={site.id} value={site.id}>
                 {site.domain}

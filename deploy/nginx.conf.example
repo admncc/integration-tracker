@@ -9,9 +9,9 @@ server {
     listen [::]:80;
     server_name tracker.example.com;
 
-    # Screenshots are capped at 10 MB in the app - leave nginx a little headroom,
-    # otherwise an upload dies with a 413 before it ever reaches Node.
-    client_max_body_size 12M;
+    # Attachments are capped at 25 MB in the app (shared/files.js). Leave nginx a
+    # little headroom, otherwise an upload dies with a 413 before it reaches Node.
+    client_max_body_size 28M;
 
     location / {
         proxy_pass http://127.0.0.1:4000;
