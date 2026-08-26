@@ -16,6 +16,11 @@ archived (reversible, from the domain's own page) or deleted permanently.
 Clicking a domain opens its detail page, where the test URL sits at the top - it
 is the first thing either side reaches for.
 
+Tick several rows and one column can be set across all of them at once - "these
+twelve went live on display today" is one action rather than twelve cell edits.
+It changes one column at a time and asks first, and each domain's own history
+still records who moved what, from what, and when.
+
 Above the table sits **network-wide**: the things that are not about one domain.
 An issue raised there is either ticked off once for the whole network, or
 created on every active domain at once so it has to be ticked off on each of

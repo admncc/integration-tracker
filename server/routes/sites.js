@@ -68,6 +68,9 @@ const updateSchema = z.object(siteFields).partial().strict();
  * table unchecked, so a negative RPM the API rejects with a 400 went straight in
  * and then silently dropped the domain out of the dashboard comparison.
  */
+/** The partner owns approval and its own RPM figure; the rest is the publisher's. */
+const PARTNER_WRITABLE = new Set(['approval', 'rpm_primis', 'rpm_primis_currency']);
+
 export const importRowSchema = z
   .object({ ...siteFields, notes: z.string().trim().max(20000) })
   .partial()
@@ -284,6 +287,91 @@ sitesRouter.post('/', requireRole('admin', 'dev'), (req, res) => {
   res.status(201).json({ site: db.prepare('SELECT * FROM sites WHERE id = ?').get(id) });
 });
 
+/**
+ * One field, many domains.
+ *
+ * "These twelve went live on display today" was twelve separate cell edits.
+ * The multi-select was already on the table and could only raise issues, so a
+ * 65-domain rollout meant hundreds of clicks.
+ *
+ * Deliberately one field at a time: a sweeping change over dozens of rows is
+ * easier to read back, and easier to undo, when the audit trail says exactly
+ * what moved.
+ */
+sitesRouter.patch('/bulk', requireRole('admin', 'dev', 'partner'), (req, res) => {
+  const parsed = z
+    .object({
+      site_ids: z.array(z.coerce.number().int().positive()).min(1, 'Pick at least one domain').max(500),
+      // The same shape a single PATCH takes, so one set of rules governs both.
+      changes: updateSchema,
+    })
+    .strict()
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
+
+  const fields = Object.entries(parsed.data.changes);
+  if (!fields.length) return res.status(400).json({ error: 'Nothing to change' });
+
+  // A domain is unique, so setting it across many rows cannot mean anything.
+  if (fields.some(([field]) => field === 'domain')) {
+    return res.status(400).json({ error: 'A domain can only be changed one at a time' });
+  }
+
+  if (req.user.role === 'partner') {
+    const forbidden = fields.map(([field]) => field).filter((field) => !PARTNER_WRITABLE.has(field));
+    if (forbidden.length) {
+      return res.status(403).json({ error: `The partner side cannot change: ${forbidden.join(', ')}` });
+    }
+  }
+
+  const ids = [...new Set(parsed.data.site_ids)];
+  const sites = db
+    .prepare(`SELECT * FROM sites WHERE id IN (${ids.map(() => '?').join(',')}) AND archived = 0`)
+    .all(...ids);
+  if (!sites.length) return res.status(404).json({ error: 'None of those domains exist, or all of them are archived' });
+
+  const assignments = fields.map(([field]) => `${field} = ?`).join(', ');
+  const update = db.prepare(`UPDATE sites SET ${assignments}, updated_at = datetime('now') WHERE id = ?`);
+  const values = fields.map(([, value]) => normalise(value));
+
+  let changed = 0;
+  const unchanged = [];
+  /*
+   * One transaction: a half-applied sweep across 40 domains is worse than none,
+   * and the caller could not tell which half had landed.
+   */
+  db.exec('BEGIN');
+  try {
+    for (const site of sites) {
+      const differs = fields.filter(([field, value]) => normalise(value) !== site[field]);
+      if (!differs.length) {
+        unchanged.push(site.domain);
+        continue;
+      }
+
+      update.run(...values, site.id);
+      changed += 1;
+      for (const [field, value] of differs) {
+        logActivity({ siteId: site.id, actorId: req.user.id, kind: 'site_updated', field, oldValue: site[field], newValue: normalise(value) });
+      }
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+
+  const skipped = ids.filter((id) => !sites.some((site) => site.id === id));
+  // The enriched shape the table renders, so the rows come back whole.
+  const touched = new Set(sites.map((site) => site.id));
+  res.json({
+    changed,
+    unchanged,
+    skipped,
+    sites: listSites({ includeArchived: true }).filter((site) => touched.has(site.id)),
+  });
+});
+
 sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => {
   const id = Number(req.params.id);
   const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(id);
@@ -297,10 +385,8 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
     if (clash) return res.status(409).json({ error: `${parsed.data.domain} is already tracked` });
   }
 
-  // The partner owns approval and its own RPM figure; the rest is the publisher's.
-  const partnerWritable = new Set(['approval', 'rpm_primis', 'rpm_primis_currency']);
   if (req.user.role === 'partner') {
-    const forbidden = Object.keys(parsed.data).filter((field) => !partnerWritable.has(field));
+    const forbidden = Object.keys(parsed.data).filter((field) => !PARTNER_WRITABLE.has(field));
     if (forbidden.length) {
       // Dropping these quietly and answering 200 told an API caller a write had
       // happened when it had not.

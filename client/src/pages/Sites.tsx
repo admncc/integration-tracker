@@ -119,6 +119,7 @@ export default function Sites() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
 
   // Hiding the revenue columns beats rendering "N..." where "New" and "None"
   // become indistinguishable; the figures are still on each domain's page.
@@ -220,6 +221,35 @@ export default function Sites() {
           return next;
         });
       }
+    }
+  }
+
+  /**
+   * One field across every selected domain. The single-cell path is optimistic
+   * because it is one row; this one waits, because a sweep over forty domains
+   * that half-applies is worse than one that takes a second.
+   */
+  async function applyToSelection(field: string, value: string | number | null) {
+    setBulkBusy(true);
+    setNotice(null);
+    try {
+      const result = await api.patch<{ changed: number; unchanged: string[]; skipped: number[]; sites: Site[] }>('/sites/bulk', {
+        site_ids: [...selected],
+        changes: { [field]: value },
+      });
+
+      const bySite = new Map(result.sites.map((site) => [site.id, site]));
+      setSites((current) => current.map((site) => bySite.get(site.id) ?? site));
+
+      const label = COLUMNS.find((column) => column.key === field)?.label ?? field;
+      const parts = [`${label} set on ${result.changed} domain(s)`];
+      if (result.unchanged.length) parts.push(`${result.unchanged.length} already had it`);
+      if (result.skipped.length) parts.push(`${result.skipped.length} skipped (archived)`);
+      setNotice({ tone: 'green', text: parts.join(' · ') });
+    } catch (err) {
+      setNotice({ tone: 'red', text: err instanceof Error ? err.message : 'Could not apply the change' });
+    } finally {
+      setBulkBusy(false);
     }
   }
 
@@ -390,6 +420,12 @@ export default function Sites() {
             {selected.size} selected
             {hiddenSelected > 0 && `, ${hiddenSelected} of them not in the current filter`}
           </span>
+          <BulkEdit
+            count={selected.size}
+            disabled={(field) => readOnly(field)}
+            busy={bulkBusy}
+            onApply={applyToSelection}
+          />
           <Button size="sm" variant="primary" onClick={() => setBulkOpen(true)}>
             Raise one issue on all
           </Button>
@@ -756,5 +792,94 @@ function AddSiteModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
         </div>
       </form>
     </Modal>
+  );
+}
+
+/**
+ * Sets one column across every selected domain.
+ *
+ * A field picker plus a value picker rather than a row of buttons: thirteen
+ * columns would be thirteen buttons, and the two-step reads as one sentence -
+ * "set Display to 1 - Live on 12 domains".
+ */
+function BulkEdit({
+  count,
+  disabled,
+  busy,
+  onApply,
+}: {
+  count: number;
+  /** The same read-only rules the table cells use, so a partner sees only theirs. */
+  disabled: (field: string) => boolean;
+  busy: boolean;
+  onApply: (field: string, value: string | number | null) => void;
+}) {
+  const fields = useMemo(
+    () =>
+      [
+        ...TRACKS.map((track) => ({ key: track.key, label: track.label, options: STATUS_OPTIONS })),
+        { key: 'cmp', label: 'CMP', options: CMP_OPTIONS },
+        { key: 'approval', label: 'Approval', options: APPROVAL_OPTIONS },
+        { key: 'priority', label: 'Priority', options: null },
+        { key: 'managed_by', label: 'Managed by', options: null },
+      ].filter((field) => !disabled(field.key)),
+    [disabled]
+  );
+
+  const [field, setField] = useState(fields[0]?.key ?? '');
+  const [value, setValue] = useState('');
+
+  const current = fields.find((entry) => entry.key === field) ?? fields[0];
+  // Switching column resets the value: "1 - Live" means nothing under Priority.
+  useEffect(() => {
+    setValue(current?.options ? (current.options[0]?.value ?? '') : '');
+  }, [field]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!current) return null;
+
+  const numeric = current.key === 'priority';
+  const ready = numeric ? /^\d{1,2}$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 99 : true;
+
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-xs text-brand-ink">Set</span>
+      <select className="field !w-auto !py-1 text-xs" value={field} onChange={(event) => setField(event.target.value)}>
+        {fields.map((entry) => (
+          <option key={entry.key} value={entry.key}>
+            {entry.label}
+          </option>
+        ))}
+      </select>
+      <span className="text-xs text-brand-ink">to</span>
+      {current.options ? (
+        <select className="field !w-auto !py-1 text-xs" value={value} onChange={(event) => setValue(event.target.value)}>
+          {current.options.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <input
+          className="field !w-32 !py-1 text-xs"
+          inputMode={numeric ? 'numeric' : undefined}
+          placeholder={numeric ? '1 - 99' : 'a name, or empty'}
+          value={value}
+          onChange={(event) => setValue(event.target.value)}
+        />
+      )}
+      <Button
+        size="sm"
+        disabled={busy || !ready}
+        onClick={() => {
+          const label = current.options?.find((option) => option.value === value)?.label ?? value;
+          // A sweep over dozens of rows is worth one question first.
+          if (!window.confirm(`Set ${current.label} to "${label || '(empty)'}" on ${count} domain(s)?`)) return;
+          onApply(current.key, numeric ? Number(value) : value);
+        }}
+      >
+        {busy ? 'Applying...' : `Apply to ${count}`}
+      </Button>
+    </div>
   );
 }
