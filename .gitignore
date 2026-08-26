@@ -4,3 +4,7 @@ data/
 *.log
 .env
 .DS_Store
+
+# Scratch scripts from QA agent runs; they live in the repo root only
+# because that is where node_modules resolves from.
+qa-agent-*.mjs
