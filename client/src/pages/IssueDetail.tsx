@@ -57,7 +57,7 @@ export default function IssueDetail() {
       .get<Payload>(`/issues/${id}`)
       .then(setData)
       .catch((err) => setError(err.message));
-    api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0)));
+    api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.active !== 0)));
   }, [id]);
 
   if (error) return <Empty>{error}</Empty>;

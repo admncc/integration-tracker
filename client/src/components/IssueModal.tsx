@@ -62,7 +62,7 @@ export default function IssueModal({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0)));
+    api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.active !== 0)));
   }, []);
 
   async function submit(event: React.FormEvent) {
@@ -292,7 +292,10 @@ export default function IssueModal({
             <select className="field" value={form.assignee_id} onChange={(e) => setForm({ ...form, assignee_id: e.target.value })}>
               <option value="">Unassigned</option>
               {users.map((user) => (
-                <option key={user.id} value={user.id}>{user.name}</option>
+                <option key={user.id} value={user.id}>
+                  {user.name}
+                  {user.company ? ` (${user.company})` : ''}
+                </option>
               ))}
             </select>
           </Field>

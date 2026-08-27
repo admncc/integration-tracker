@@ -480,13 +480,37 @@ issuesRouter.patch('/:id', (req, res) => {
     if (badAssignee) return res.status(400).json({ error: badAssignee });
   }
 
-  if (data.status && data.status !== issue.status && !ALLOWED_TRANSITIONS[req.user.role].includes(data.status)) {
-    return res.status(403).json({ error: `A ${req.user.role} cannot set an issue to "${ISSUE_STATUS[data.status].label}"` });
+  /*
+   * Role governs what you may do to somebody else's work. Being the assignee
+   * lets you drive your own: whoever the issue is on can move it through the
+   * working states whatever company they are at.
+   *
+   * This is what makes the partner assignable in practice. Primis have their
+   * own steps in this rollout - approving a domain with their demand partners,
+   * generating the display tags - and a task on Omar that he cannot mark "in
+   * progress" or hand back is a task he has to report on by e-mail instead.
+   */
+  const WORKING_STATES = ['open', 'in_progress', 'blocked', 'ready_for_qa'];
+  const mine = issue.assignee_id != null && issue.assignee_id === req.user.id;
+  const allowed = mine
+    ? [...new Set([...ALLOWED_TRANSITIONS[req.user.role], ...WORKING_STATES])]
+    : ALLOWED_TRANSITIONS[req.user.role];
+
+  if (data.status && data.status !== issue.status && !allowed.includes(data.status)) {
+    return res.status(403).json({
+      error: mine
+        ? `Nobody can set an issue to "${ISSUE_STATUS[data.status].label}" from here`
+        : `A ${req.user.role} cannot set an issue to "${ISSUE_STATUS[data.status].label}"`,
+    });
   }
-  // The partner can park an issue, so they must be able to say what on.
-  const PARTNER_WRITABLE = new Set(['status', 'blocked_on']);
+  /*
+   * The partner parks an issue and says what on, and schedules and hands on the
+   * work they own. What stays theirs alone is the text of the finding: nobody
+   * rewrites somebody else's report of what is wrong.
+   */
+  const PARTNER_WRITABLE = new Set(['status', 'blocked_on', 'assignee_id', 'due_date']);
   if (req.user.role === 'partner' && Object.keys(data).some((k) => !PARTNER_WRITABLE.has(k))) {
-    return res.status(403).json({ error: 'The partner side can change the status and add comments, not the issue body' });
+    return res.status(403).json({ error: 'The partner side can change the status, the assignee and the dates, not the text of the issue' });
   }
 
   const updates = Object.entries(data).filter(([field, value]) => normalise(value, field) !== issue[field]);

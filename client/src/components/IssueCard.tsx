@@ -14,8 +14,17 @@ const ALLOWED_TRANSITIONS: Record<string, IssueStatus[]> = {
   partner: ['open', 'blocked', 'verified', 'wont_fix'],
 };
 
+/** States anyone may drive an issue through once it is theirs. */
+const WORKING_STATES: IssueStatus[] = ['open', 'in_progress', 'blocked', 'ready_for_qa'];
+
 /** The single obvious next step per role, surfaced as a button next to the dropdown. */
-function primaryAction(status: IssueStatus, role: string): { next: IssueStatus; label: string } | null {
+function primaryAction(status: IssueStatus, role: string, mine = false): { next: IssueStatus; label: string } | null {
+  // An issue on your own desk reads the same whoever you work for.
+  if (role === 'partner' && mine) {
+    if (status === 'open') return { next: 'in_progress', label: 'Start working' };
+    if (status === 'in_progress') return { next: 'ready_for_qa', label: 'Done - hand it back' };
+    if (status === 'blocked') return { next: 'in_progress', label: 'Unblocked - pick it back up' };
+  }
   if (role === 'partner') {
     if (status === 'ready_for_qa') return { next: 'verified', label: 'Verified - close it' };
     if (status === 'verified') return { next: 'open', label: 'Reopen' };
@@ -122,14 +131,23 @@ export default function IssueCard({
   const status = ISSUE_STATUS[issue.status] as { label: string; tone: Tone };
   const severity = SEVERITY[issue.severity] as { label: string; tone: Tone };
   const type = ISSUE_TYPE[issue.type] as { label: string; tone: Tone };
-  const action = user ? primaryAction(issue.status, user.role) : null;
+  const action = user ? primaryAction(issue.status, user.role, issue.assignee_id != null && issue.assignee_id === user.id) : null;
   /*
    * The reader's own calendar date. Comparing against the UTC date flipped an
    * issue to overdue up to a day early or late depending on the zone, while the
    * date itself was picked from a local-calendar date input.
    */
   const overdue = Boolean(issue.due_date) && !ISSUE_STATUS[issue.status].terminal && issue.due_date! < localDate();
-  const statusOptions = (ALLOWED_TRANSITIONS[user?.role ?? 'partner'] ?? [])
+  /*
+   * Mirrors the server: whoever the issue is assigned to can move it through
+   * the working states, whatever company they are at. Role still governs what
+   * you may do to somebody else's work.
+   */
+  const mine = issue.assignee_id != null && issue.assignee_id === user?.id;
+  const available = new Set([...(ALLOWED_TRANSITIONS[user?.role ?? 'partner'] ?? []), ...(mine ? WORKING_STATES : [])]);
+  // In the order the loop runs, not the order the two lists were merged in.
+  const statusOptions = (Object.keys(ISSUE_STATUS) as IssueStatus[])
+    .filter((value) => available.has(value))
     .map((value) => ({ value, label: ISSUE_STATUS[value].label }));
   const issueAttachments = detail?.attachments.filter((a) => a.comment_id == null) ?? [];
 
@@ -292,7 +310,7 @@ export default function IssueCard({
             <p className="text-sm whitespace-pre-wrap text-ink-soft [overflow-wrap:anywhere]">{issue.description}</p>
           )}
 
-          {user?.role !== 'partner' && (
+          {!deleted && (
             <div className="flex flex-wrap items-center gap-2 text-xs">
               <span className="text-ink-faint">Assignee</span>
               <select
@@ -301,8 +319,12 @@ export default function IssueCard({
                 onChange={(event) => update({ assignee_id: event.target.value ? Number(event.target.value) : null })}
               >
                 <option value="">Unassigned</option>
+                {/* The company is part of the name here: two of them share this list. */}
                 {users.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>{candidate.name}</option>
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name}
+                    {candidate.company ? ` (${candidate.company})` : ''}
+                  </option>
                 ))}
                 {/*
                   * The list holds active people only, so an issue left with a

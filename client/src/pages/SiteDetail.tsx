@@ -50,7 +50,7 @@ export default function SiteDetail() {
   useEffect(() => {
     setLoading(true);
     load();
-    api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0)));
+    api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.active !== 0)));
   }, [load]);
 
   /*

@@ -135,7 +135,7 @@ export default function Issues() {
   useEffect(() => {
     api.get<{ sites: Site[] }>('/sites?archived=1').then((r) => setSites(r.sites));
     api.get<{ users: User[] }>('/users').then((r) => {
-      setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0));
+      setUsers(r.users.filter((u) => u.active !== 0));
       setAllUsers(r.users);
     });
   }, []);

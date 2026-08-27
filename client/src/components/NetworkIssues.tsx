@@ -54,7 +54,7 @@ export default function NetworkIssues({ sites, onIssuesChanged }: { sites: Site[
     if (can('raise_issue')) {
       api
         .get<{ users: User[] }>('/users')
-        .then((r) => setUsers(r.users.filter((u) => u.role !== 'partner' && u.active !== 0)))
+        .then((r) => setUsers(r.users.filter((u) => u.active !== 0)))
         .catch(() => setUsers([]));
     }
   }, [can]);

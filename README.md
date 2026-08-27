@@ -110,9 +110,19 @@ Two things stay with the publisher: **archiving or deleting a domain**, which
 takes it out of the list for everyone, and **user accounts and the exchange
 rate**, which are admin-only.
 
-On issues the roles still differ: no developer can mark anything **verified** -
-only the partner or an admin can - and the partner changes an issue's status but
-not the text of somebody else's finding. Both are enforced server-side, not just
+**Anyone can be an assignee**, on either side of the table. The partner has
+their own steps in a rollout - approving a domain with their demand partners,
+generating the display tags - so a task can sit on them the same way it sits on
+a developer, and it shows up in their "waiting on you".
+
+Role governs what you may do to *somebody else's* work; being the assignee lets
+you drive your own. Whoever an issue is on can move it through open → in
+progress → blocked → ready for re-check whatever company they work for, and can
+schedule it or hand it on.
+
+The rest of the roles still differ: no developer can mark anything **verified** -
+only the partner or an admin can, and being the assignee does not change that -
+and nobody rewrites the text of somebody else's finding. Both are enforced server-side, not just
 hidden in the interface. A developer can close an issue as **won't fix**, which
 is terminal too; that is deliberate, so a finding the publisher disagrees with
 does not sit open forever, and it shows in the history with their name on it.

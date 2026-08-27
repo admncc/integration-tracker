@@ -145,16 +145,21 @@ metaRouter.get('/inbox', (req, res) => {
 
   const items = [];
 
+  /*
+   * Work on your own desk, whoever you work for. The partner has their own
+   * steps in this rollout - approving a domain with their demand partners,
+   * generating the display tags - so a task assigned to them belongs here too.
+   */
+  const mine = db
+    .prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.assignee_id = ? AND i.status IN ('open','in_progress')`)
+    .get(req.user.id).n;
+  if (mine) items.push({ key: 'assigned', n: mine, label: mine === 1 ? '1 issue assigned to you' : `${mine} issues assigned to you`, to: `/issues?status=open&assignee_id=${req.user.id}` });
+
   if (req.user.role === 'partner') {
     // Fixed and handed back: nothing moves until the partner looks.
     const n = db.prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.status = 'ready_for_qa'`).get().n;
     if (n) items.push({ key: 'ready_for_qa', n, label: n === 1 ? '1 fix to re-check' : `${n} fixes to re-check`, to: '/issues?status=ready_for_qa' });
   } else {
-    const mine = db
-      .prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.assignee_id = ? AND i.status IN ('open','in_progress')`)
-      .get(req.user.id).n;
-    if (mine) items.push({ key: 'assigned', n: mine, label: mine === 1 ? '1 issue assigned to you' : `${mine} issues assigned to you`, to: `/issues?status=open&assignee_id=${req.user.id}` });
-
     const unowned = db
       .prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.assignee_id IS NULL AND i.status = 'open'`)
       .get().n;
