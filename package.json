@@ -15,6 +15,7 @@
     "start": "NODE_ENV=production node server/index.js",
     "seed": "node scripts/seed.js",
     "reset": "node scripts/seed.js --reset",
+    "assign-owner": "node scripts/assign-owner.js",
     "test": "node --test test/*.test.js"
   },
   "dependencies": {

@@ -135,10 +135,27 @@ Open `https://tracker.example.com`, sign in as `admin` with the password from
    `SEED_PASSWORD`, so leaving one untouched leaves a known password on the box.
 4. Settings → check the EUR/USD rate says "European Central Bank" - that
    confirms the server can reach the outside world.
-5. Settings → Daily digest: paste a Slack or Teams incoming webhook and the
+5. Settings → make somebody responsible for the domains. Create the accounts
+   first, then hand the active ones over in one command - it uses the account
+   that is already there and leaves the priority-99 pile alone:
+
+   ```bash
+   cd /opt/integration-tracker
+   sudo -u tracker -H npm run assign-owner -- --list          # who there is
+   sudo -u tracker -H npm run assign-owner -- <username>      # hand them over
+   ```
+
+   `--dry-run` says what it would do without doing it, and running it twice
+   changes nothing the second time. Afterwards it is edited per domain on the
+   domain's own page, or across a selection on the Sites page.
+6. Settings → Daily digest: paste a Slack or Teams incoming webhook and the
    tracker's own address, then press "Send one now" to check it arrives. This is
    what tells both sides it is their turn; without it people fall back to
    e-mail. Outbound HTTPS to the webhook host has to be open.
+
+`npm run seed` never creates an account for a real person and never decides who
+is responsible for what: the four accounts it makes share a published default
+password, which is fine for an empty install and wrong for anybody real.
 
 Only then send the link to the partner.
 

@@ -26,18 +26,18 @@ const USERS = [
   { username: 'dev',        email: 'dev@publisher.test',   name: 'Dev Team',     role: 'dev',     company: 'Publisher' },
   { username: 'dev-extern', email: 'dev2@publisher.test',  name: 'External Dev', role: 'dev',     company: 'Publisher' },
   { username: 'primis-qa',  email: 'qa@primis.test',       name: 'Primis QA',    role: 'partner', company: 'Primis' },
-  { username: 'omery',      email: 'omery@primis.test',    name: 'Omer Yahav',   role: 'partner', company: 'Primis' },
 ];
 
-/**
- * Who holds the active domains to start with.
+/*
+ * Real people are not seeded, and neither is who is responsible for what.
  *
- * Primis handle their own steps of the rollout - approving a domain with their
- * demand partners, generating the display tags - so the domains that are
- * actually being rolled out sit with them by default. Priority 99 is parked and
- * stays unowned; nobody is answerable for a domain nobody is working on.
+ * The four above are starting points for an empty install, with a published
+ * default password. An account for somebody who actually exists belongs in
+ * Settings, made by an admin, with a password only they know - and handing the
+ * domains to them is `npm run assign-owner`, which works on the account that is
+ * already there instead of inventing a second one under a username of its own
+ * choosing.
  */
-const DEFAULT_SITE_OWNER = 'omery';
 
 // PRIO | domain | video | display | test URL | ads.txt | ad tag | MCM | CMP | approval
 const SHEET = `
@@ -104,7 +104,15 @@ const SHEET = `
 
 const userIds = {};
 for (const user of USERS) {
-  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(user.username);
+  /*
+   * By username, and failing that by name: an account somebody created by hand
+   * has whatever username they chose, and matching only on the username made a
+   * second "Omer Yahav" appear the first time the seed ran afterwards.
+   */
+  const existing =
+    db.prepare('SELECT id FROM users WHERE username = ?').get(user.username) ??
+    db.prepare('SELECT id FROM users WHERE lower(name) = lower(?)').get(user.name);
+
   userIds[user.username] = existing
     ? existing.id
     : Number(
@@ -478,16 +486,15 @@ console.log(`Database now holds ${counts.sites} sites, ${counts.issues} issues, 
  * Only where nobody has been named yet, so a later hand-over made in the tool
  * survives the next `npm run seed`.
  */
-const defaultOwner = db.prepare('SELECT id FROM users WHERE username = ?').get(DEFAULT_SITE_OWNER);
-if (defaultOwner) {
-  const assigned = db
-    .prepare('UPDATE sites SET owner_id = ? WHERE owner_id IS NULL AND archived = 0 AND priority < 99')
-    .run(defaultOwner.id).changes;
-  if (assigned) console.log(`Made ${DEFAULT_SITE_OWNER} responsible for ${assigned} active domain(s).`);
-}
-
 db.exec('UPDATE users SET inbox_seen_message_id = (SELECT COALESCE(MAX(id), 0) FROM site_messages)');
 
 console.log(`\nSign in with any of these (password: ${DEFAULT_PASSWORD}):`);
 for (const u of USERS) console.log(`  ${u.role.padEnd(8)} ${u.username.padEnd(12)} (${u.name})`);
+const unowned = db.prepare('SELECT COUNT(*) AS n FROM sites WHERE archived = 0 AND priority < 99 AND owner_id IS NULL').get().n;
+if (unowned) {
+  console.log(`\n${unowned} active domain(s) have nobody responsible for them yet.`);
+  console.log('  npm run assign-owner -- --list        who there is');
+  console.log('  npm run assign-owner -- <username>    hand them over');
+}
+
 console.log('\nChange these passwords before putting the tracker in front of the partner.');

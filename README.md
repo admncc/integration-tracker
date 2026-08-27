@@ -19,7 +19,10 @@ is the first thing either side reaches for.
 Every domain can have somebody **responsible** for it - a real person in the
 tool, on either side. Primis own their steps of a rollout, so the domains being
 rolled out sit with them; their header then counts how many of theirs are not
-live yet. It is set on the domain's own page, or across a selection at once. The
+live yet. It is set on the domain's own page, or across a selection at once - or, for a
+whole rollout in one go, with `npm run assign-owner -- <username or name>`,
+which uses the account that is already there and leaves the parked domains
+alone. The
 table has no column for it: the grid has to fit without sideways scrolling, and
 a name costs more width than it earns in a list you scan for status.
 
