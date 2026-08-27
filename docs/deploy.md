@@ -217,12 +217,23 @@ from the backup directory back to `/opt/integration-tracker/.env` and
 
 ## Updating
 
+Every command runs **as `tracker`**, not as root. The files belong to `tracker`,
+and git refuses to work in a directory somebody else owns:
+
 ```bash
 cd /opt/integration-tracker
 sudo -u tracker -H git pull
 sudo -u tracker -H npm ci
 sudo -u tracker -H npm run build
 sudo systemctl restart integration-tracker
+```
+
+If you already ran one of them as root, put the ownership back first -
+otherwise the next `sudo -u tracker npm ci` fails on a `node_modules` it cannot
+write:
+
+```bash
+sudo chown -R tracker:tracker /opt/integration-tracker
 ```
 
 Schema changes apply themselves on start-up, and they only ever add - no
@@ -267,6 +278,9 @@ the database is on the new schema. Restore the backup as well.
 | A domain has vanished from the list | It was archived. Open it directly at `/sites/<id>`, or tick "Show archived" on the Sites page, and use "Bring it back" |
 | The dashboard and the issue list show different counts | They should not any more; both exclude archived domains. Tick "Include archived domains" on the Issues page to see the rest |
 | Sign-in says "too many attempts" for everyone | `TRUST_PROXY=1` missing from `.env` |
+| `fatal: detected dubious ownership` on `git pull` | You are root in a directory owned by `tracker`. Use `sudo -u tracker -H git pull`. Do not add a `safe.directory` exception: running git as root here leaves root-owned files behind, and the service cannot write them |
+| `npm error Missing script` right after an update | The `git pull` before it failed, so the new code never arrived. With `a && b` a failed `a` stops `b` - scroll up and read the first error, not the last |
+| `EACCES` from `npm ci` | Something was run as root earlier. `sudo chown -R tracker:tracker /opt/integration-tracker` |
 | Sign-in works but every page is empty | old build: the session cookie was dropped over plain HTTP. `git pull` and rebuild |
 | The daily digest never arrives | Settings shows the last attempt and its error. A quiet day sends nothing by design; otherwise it is usually outbound HTTPS being blocked, or a webhook the channel has revoked |
 | Exchange rate stuck at 1.08 | the server cannot reach `ecb.europa.eu`; set the rate by hand under Settings |
