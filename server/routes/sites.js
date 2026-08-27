@@ -53,6 +53,11 @@ const siteFields = {
   rpm_primis_currency: z.enum(CURRENCIES),
   managed_by: z.preprocess(cleanText, z.string().trim().max(190)),
   /*
+   * The person answerable for this domain, on either side. Null clears it -
+   * "nobody has picked this up yet" is a real and visible state, not an error.
+   */
+  owner_id: z.union([z.null(), z.coerce.number().int().positive()]),
+  /*
    * A real boolean, not a coerced one. z.coerce.boolean() turns "false" and
    * "0" into true, so the call meant to bring a site back archived it instead.
    * The same trap was already fixed for users.active and the FX switch.
@@ -90,17 +95,27 @@ export const importRowSchema = z
   .required({ domain: true })
   .strict();
 
+/** A domain cannot be handed to somebody who does not exist or cannot sign in. */
+function ownerError(ownerId) {
+  if (ownerId == null) return null;
+  const user = db.prepare('SELECT id, active FROM users WHERE id = ?').get(ownerId);
+  if (!user) return 'That person does not exist';
+  if (!user.active) return 'That account is disabled';
+  return null;
+}
+
 /** Sites plus their open-issue counts, so the list view needs a single query. */
 function listSites({ includeArchived = false } = {}) {
   return db
     .prepare(
-      `SELECT s.*,
+      `SELECT s.*, o.name AS owner_name, o.company AS owner_company, o.role AS owner_role,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status IN (${openList})) AS open_issues,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status = 'ready_for_qa') AS awaiting_qa,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status = 'blocked') AS blocked_issues,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL) AS total_issues,
               (SELECT COUNT(*) FROM site_messages m WHERE m.site_id = s.id AND m.deleted_at IS NULL) AS message_count
          FROM sites s
+         LEFT JOIN users o ON o.id = s.owner_id
         WHERE (? = 1 OR s.archived = 0)
         ORDER BY s.priority ASC, s.domain ASC`
     )
@@ -112,7 +127,12 @@ sitesRouter.get('/', (req, res) => {
 });
 
 sitesRouter.get('/:id', (req, res) => {
-  const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(Number(req.params.id));
+  const site = db
+    .prepare(
+      `SELECT s.*, o.name AS owner_name, o.company AS owner_company, o.role AS owner_role
+         FROM sites s LEFT JOIN users o ON o.id = s.owner_id WHERE s.id = ?`
+    )
+    .get(Number(req.params.id));
   if (!site) return res.status(404).json({ error: 'Site not found' });
 
   const issues = db
@@ -290,6 +310,9 @@ sitesRouter.post('/', requireRole('admin', 'dev'), (req, res) => {
   const exists = db.prepare('SELECT id FROM sites WHERE domain = ?').get(data.domain);
   if (exists) return res.status(409).json({ error: `${data.domain} is already tracked` });
 
+  const badOwner = 'owner_id' in data ? ownerError(data.owner_id) : null;
+  if (badOwner) return res.status(400).json({ error: badOwner });
+
   const columns = Object.keys(data);
   const info = db
     .prepare(`INSERT INTO sites (${columns.join(',')}) VALUES (${columns.map(() => '?').join(',')})`)
@@ -297,7 +320,8 @@ sitesRouter.post('/', requireRole('admin', 'dev'), (req, res) => {
 
   const id = Number(info.lastInsertRowid);
   logActivity({ siteId: id, actorId: req.user.id, kind: 'site_created', newValue: data.domain });
-  res.status(201).json({ site: db.prepare('SELECT * FROM sites WHERE id = ?').get(id) });
+  // The enriched row, so a new domain arrives in the table with its owner named.
+  res.status(201).json({ site: listSites({ includeArchived: true }).find((site) => site.id === id) });
 });
 
 /**
@@ -324,6 +348,9 @@ sitesRouter.patch('/bulk', requireRole('admin', 'dev', 'partner'), (req, res) =>
 
   const fields = Object.entries(parsed.data.changes);
   if (!fields.length) return res.status(400).json({ error: 'Nothing to change' });
+
+  const badOwner = 'owner_id' in parsed.data.changes ? ownerError(parsed.data.changes.owner_id) : null;
+  if (badOwner) return res.status(400).json({ error: badOwner });
 
   // A domain is unique, so setting it across many rows cannot mean anything.
   if (fields.some(([field]) => field === 'domain')) {
@@ -393,6 +420,9 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
   const parsed = updateSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
 
+  const badOwner = 'owner_id' in parsed.data ? ownerError(parsed.data.owner_id) : null;
+  if (badOwner) return res.status(400).json({ error: badOwner });
+
   if (parsed.data.domain && parsed.data.domain !== site.domain) {
     const clash = db.prepare('SELECT id FROM sites WHERE domain = ? AND id != ?').get(parsed.data.domain, id);
     if (clash) return res.status(409).json({ error: `${parsed.data.domain} is already tracked` });
@@ -417,7 +447,7 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
   for (const [field, value] of updates) {
     logActivity({ siteId: id, actorId: req.user.id, kind: 'site_updated', field, oldValue: site[field], newValue: normalise(value) });
   }
-  res.json({ site: db.prepare('SELECT * FROM sites WHERE id = ?').get(id) });
+  res.json({ site: listSites({ includeArchived: true }).find((row) => row.id === id) });
 });
 
 sitesRouter.delete('/:id', requireRole('admin'), (req, res) => {

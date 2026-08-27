@@ -16,6 +16,13 @@ archived (reversible, from the domain's own page) or deleted permanently.
 Clicking a domain opens its detail page, where the test URL sits at the top - it
 is the first thing either side reaches for.
 
+Every domain can have somebody **responsible** for it - a real person in the
+tool, on either side. Primis own their steps of a rollout, so the domains being
+rolled out sit with them; their header then counts how many of theirs are not
+live yet. It is set on the domain's own page, or across a selection at once. The
+table has no column for it: the grid has to fit without sideways scrolling, and
+a name costs more width than it earns in a list you scan for status.
+
 Tick several rows and one column can be set across all of them at once - "these
 twelve went live on display today" is one action rather than twelve cell edits.
 It changes one column at a time and asks first, and each domain's own history

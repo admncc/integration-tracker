@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS sites (
   -- as dollars and the uplift beside it was wrong by the exchange rate.
   rpm_primis_currency   TEXT NOT NULL DEFAULT 'EUR',
   managed_by        TEXT NOT NULL DEFAULT '',
+  -- Who is answerable for getting this domain live. A real person in the tool,
+  -- on either side: Primis own their steps of the rollout as much as the
+  -- publisher's team does. managed_by stays what it was - a free-text note for
+  -- work that happens outside the tracker altogether.
+  owner_id          INTEGER REFERENCES users(id) ON DELETE SET NULL,
   notes             TEXT NOT NULL DEFAULT '',
   archived          INTEGER NOT NULL DEFAULT 0,
   created_at        TEXT NOT NULL DEFAULT (datetime('now')),
@@ -178,6 +183,8 @@ const LATE_COLUMNS = [
   ['issues', 'blocked_since', 'TEXT'],
   // The newest discussion message this person has seen.
   ['users', 'inbox_seen_message_id', 'INTEGER NOT NULL DEFAULT 0'],
+  // Who is answerable for the domain.
+  ['sites', 'owner_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'],
 ];
 
 for (const [table, column, definition] of LATE_COLUMNS) {
@@ -331,6 +338,7 @@ db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)
  * adds it ever ran.
  */
 db.exec('CREATE INDEX IF NOT EXISTS idx_issues_batch ON issues(batch_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_sites_owner ON sites(owner_id)');
 
 /*
  * Rows created under the old USD default that nobody has entered a figure for

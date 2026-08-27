@@ -35,6 +35,11 @@ export interface Site {
   rpm_primis: number | null;
   rpm_primis_currency: Currency;
   managed_by: string;
+  /** Who is answerable for this domain. Null means nobody has taken it on. */
+  owner_id: number | null;
+  owner_name?: string | null;
+  owner_company?: string | null;
+  owner_role?: Role | null;
   notes: string;
   archived: number;
   created_at: string;

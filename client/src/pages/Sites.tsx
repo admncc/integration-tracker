@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
-import type { Site, TrackStatus } from '../lib/types';
+import type { Site, TrackStatus, User } from '../lib/types';
 import { APPROVAL, CMP, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
 import { Badge, Button, CurrencyToggle, Empty, Field, InlineSelect, InlineText, Modal, Spinner, type Tone } from '../components/ui';
 import IssueModal from '../components/IssueModal';
@@ -58,7 +58,7 @@ const tonesOf = (map: Record<string, { tone: string }>) =>
  * on the site's detail page instead.
  */
 const COLUMNS: Column[] = [
-  { key: 'priority', label: 'Prio', kind: 'number', weight: 4 },
+  { key: 'priority', label: 'Prio', kind: 'number', weight: 4.7 },
   { key: 'domain', label: 'Domain', kind: 'text', weight: 11.5 },
   ...TRACKS.map((track) => ({
     key: track.key,
@@ -66,11 +66,11 @@ const COLUMNS: Column[] = [
     kind: 'enum' as const,
     options: STATUS_OPTIONS,
     tones: tonesOf(TRACK_STATUS),
-    weight: 9,
+    weight: 8.7,
   })),
   { key: 'cmp', label: 'CMP', kind: 'enum', options: CMP_OPTIONS, tones: tonesOf(CMP), weight: 5.5, tier: 2 },
   { key: 'approval', label: 'Approval', kind: 'enum', options: APPROVAL_OPTIONS, tones: tonesOf(APPROVAL), weight: 8.5, tier: 2 },
-  { key: 'open_issues', label: 'Issues', kind: 'issues', weight: 5.5 },
+  { key: 'open_issues', label: 'Issues', kind: 'issues', weight: 6.3 },
   { key: 'rpm_previous', label: 'Prev. RPM', kind: 'money', weight: 6.5, secondary: true },
   { key: 'rpm_primis', label: 'Primis RPM', kind: 'money', weight: 6.5, secondary: true },
   { key: 'rpm_uplift', label: 'Δ', kind: 'uplift', weight: 4.5, secondary: true },
@@ -117,12 +117,14 @@ export default function Sites() {
   const [readiness, setReadiness] = useState<'all' | 'live' | 'incomplete' | 'inactive'>('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
 
   // Hiding the revenue columns beats rendering "N..." where "New" and "None"
   // become indistinguishable; the figures are still on each domain's page.
   const [width, setWidth] = useState(() => window.innerWidth);
+  const [params] = useSearchParams();
   /** Newest save wins per cell, so a slow response cannot undo a later edit. */
   const saveTickets = useRef(new Map<string, number>());
   const [saving, setSaving] = useState<Set<string>>(new Set());
@@ -160,6 +162,17 @@ export default function Sites() {
   }, [showArchived]);
 
   useEffect(reload, [reload]);
+
+  useEffect(() => {
+    // Everyone who can hold a domain - both companies, active accounts only.
+    api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.active !== 0))).catch(() => setUsers([]));
+  }, []);
+
+  /* `/sites?owner=3` is where the header's "N domains of yours" lands. */
+  const ownerParam = params.get('owner');
+  useEffect(() => {
+    if (ownerParam) setFilters((current) => ({ ...current, owner_id: ownerParam }));
+  }, [ownerParam]);
 
   useEffect(() => {
     if (!notice) return;
@@ -272,6 +285,10 @@ export default function Sites() {
           if (value === 'missing') return uplift == null;
           return true;
         }
+        if (key === 'owner_id') {
+          if (value === 'none') return site.owner_id == null;
+          return String(site.owner_id ?? '') === value;
+        }
         if (key === 'open_issues') {
           const open = site.open_issues ?? 0;
           if (value === 'any') return open > 0;
@@ -373,6 +390,28 @@ export default function Sites() {
               Clear filters ({activeFilters})
             </Button>
           )}
+          {/*
+            * Who a domain sits with is edited on the domain's own page - the
+            * table has no column for it. But the header's "N domains of yours"
+            * links here, so the view it opens has to be visible and clearable.
+            */}
+          <label className="flex items-center gap-1.5 text-sm text-ink-soft">
+            Responsible
+            <select
+              className="field !w-auto !py-1 text-sm"
+              value={filters.owner_id ?? ''}
+              onChange={(event) => setFilters((current) => ({ ...current, owner_id: event.target.value }))}
+            >
+              <option value="">Anyone</option>
+              <option value="none">Nobody yet</option>
+              {users.map((candidate) => (
+                <option key={candidate.id} value={candidate.id}>
+                  {candidate.name}
+                  {candidate.company ? ` (${candidate.company})` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
           <label className="flex items-center gap-1.5 text-sm text-ink-soft">
             <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
             Show archived
@@ -427,6 +466,7 @@ export default function Sites() {
           <BulkEdit
             count={selected.size}
             disabled={(field) => readOnly(field)}
+            users={users}
             busy={bulkBusy}
             onApply={applyToSelection}
           />
@@ -809,12 +849,14 @@ function AddSiteModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
 function BulkEdit({
   count,
   disabled,
+  users,
   busy,
   onApply,
 }: {
   count: number;
   /** The same read-only rules the table cells use, so a partner sees only theirs. */
   disabled: (field: string) => boolean;
+  users: User[];
   busy: boolean;
   onApply: (field: string, value: string | number | null) => void;
 }) {
@@ -824,10 +866,23 @@ function BulkEdit({
         ...TRACKS.map((track) => ({ key: track.key, label: track.label, options: STATUS_OPTIONS })),
         { key: 'cmp', label: 'CMP', options: CMP_OPTIONS },
         { key: 'approval', label: 'Approval', options: APPROVAL_OPTIONS },
+        {
+          // Handing a whole rollout to one person, which is the case that
+          // actually comes up: "these 35 are Primis's to get live".
+          key: 'owner_id',
+          label: 'Responsible',
+          options: [
+            { value: '', label: 'Nobody' },
+            ...users.map((candidate) => ({
+              value: String(candidate.id),
+              label: `${candidate.name}${candidate.company ? ` (${candidate.company})` : ''}`,
+            })),
+          ],
+        },
         { key: 'priority', label: 'Priority', options: null },
         { key: 'managed_by', label: 'Managed by', options: null },
       ].filter((field) => !disabled(field.key)),
-    [disabled]
+    [disabled, users]
   );
 
   const [field, setField] = useState(fields[0]?.key ?? '');
@@ -842,6 +897,8 @@ function BulkEdit({
   if (!current) return null;
 
   const numeric = current.key === 'priority';
+  // "Nobody" is a real choice, so an empty value is a valid one here.
+  const person = current.key === 'owner_id';
   const ready = numeric ? /^\d{1,2}$/.test(value.trim()) && Number(value) >= 1 && Number(value) <= 99 : true;
 
   return (
@@ -879,7 +936,7 @@ function BulkEdit({
           const label = current.options?.find((option) => option.value === value)?.label ?? value;
           // A sweep over dozens of rows is worth one question first.
           if (!window.confirm(`Set ${current.label} to "${label || '(empty)'}" on ${count} domain(s)?`)) return;
-          onApply(current.key, numeric ? Number(value) : value);
+          onApply(current.key, numeric ? Number(value) : person ? (value ? Number(value) : null) : value);
         }}
       >
         {busy ? 'Applying...' : `Apply to ${count}`}

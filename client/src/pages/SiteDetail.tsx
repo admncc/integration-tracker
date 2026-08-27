@@ -67,6 +67,8 @@ export default function SiteDetail() {
     let value: string | number | boolean | null = raw;
     // `archived` is a real boolean server-side; "1" would be rejected.
     if (field === 'archived') value = raw === '1' || raw === 'true';
+    // An empty owner means nobody, which is a value rather than a blank string.
+    else if (field === 'owner_id') value = raw === '' ? null : Number(raw);
     else if (numeric) {
       if (raw.trim() === '') value = null;
       else {
@@ -201,7 +203,37 @@ export default function SiteDetail() {
             <dl className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-2">
               <Editable label="Domain" value={site.domain} disabled={readOnly('domain')} onCommit={(v) => patchSite('domain', v)} />
               <Editable label="Priority" value={String(site.priority)} type="number" disabled={readOnly('priority')} onCommit={(v) => patchSite('priority', v)} />
-              <Editable label="Managed by" value={site.managed_by} disabled={readOnly('managed_by')} onCommit={(v) => patchSite('managed_by', v)} />
+              <div>
+                <span className="text-xs text-ink-faint">Responsible</span>
+                <div className="mt-0.5">
+                  {readOnly('owner_id') ? (
+                    <span className="text-sm">{site.owner_name ?? <span className="text-ink-faint">Nobody yet</span>}</span>
+                  ) : (
+                    <select
+                      className="field !py-1 text-sm"
+                      value={site.owner_id ?? ''}
+                      onChange={(event) => patchSite('owner_id', event.target.value)}
+                    >
+                      <option value="">Nobody yet</option>
+                      {users.map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name}
+                          {candidate.company ? ` (${candidate.company})` : ''}
+                        </option>
+                      ))}
+                      {site.owner_id != null && !users.some((u) => u.id === site.owner_id) && (
+                        <option value={site.owner_id}>{site.owner_name ?? 'Unknown'} (disabled)</option>
+                      )}
+                    </select>
+                  )}
+                </div>
+              </div>
+              <Editable
+                label="Managed by"
+                value={site.managed_by}
+                disabled={readOnly('managed_by')}
+                onCommit={(v) => patchSite('managed_by', v)}
+              />
             </dl>
 
             <div className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-3">
@@ -318,7 +350,7 @@ export default function SiteDetail() {
             {activity.map((entry) => (
               <li key={entry.id} className="border-l border-line pl-3 text-xs">
                 <div className="text-ink-soft">
-                  <span className="font-medium text-ink">{entry.actor_name ?? 'System'}</span> {describe(entry)}
+                  <span className="font-medium text-ink">{entry.actor_name ?? 'System'}</span> {describe(entry, users)}
                 </div>
                 <Timestamp iso={entry.created_at} className="text-ink-faint" />
               </li>
@@ -643,10 +675,20 @@ const FIELD_LABELS: Record<string, string> = {
   rpm_previous_currency: 'the previous RPM currency',
   rpm_primis_currency: 'the Primis RPM currency',
   managed_by: 'Managed by',
+  owner_id: 'who is responsible',
   archived: 'the archived flag',
 };
 
-function describe(entry: ActivityEntry) {
+function describe(entry: ActivityEntry, users: User[] = []) {
+  /*
+   * A user id in the audit trail is a fact about a person, and should read like
+   * one. "changed who is responsible from 3 to 5" told nobody anything.
+   */
+  const person = (value: string | null) => {
+    if (!value) return 'nobody';
+    return users.find((u) => String(u.id) === String(value))?.name ?? `user ${value}`;
+  };
+
   /*
    * "none" means "No CMP" in one column and "Not submitted" in another. The
    * maps used to be merged into one lookup, so approval won and the history
@@ -654,6 +696,7 @@ function describe(entry: ActivityEntry) {
    * that never happened.
    */
   const label = (value: string | null) => {
+    if (entry.field === 'owner_id') return person(value);
     if (!value) return '-';
     return VALUE_MAPS[entry.field ?? '']?.[value]?.label ?? value;
   };

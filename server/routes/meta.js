@@ -155,6 +155,27 @@ metaRouter.get('/inbox', (req, res) => {
     .get(req.user.id).n;
   if (mine) items.push({ key: 'assigned', n: mine, label: mine === 1 ? '1 issue assigned to you' : `${mine} issues assigned to you`, to: `/issues?status=open&assignee_id=${req.user.id}` });
 
+  /*
+   * Domains on your name that have not made it live yet. This is the rollout
+   * backlog somebody actually owns, as opposed to the pile of open issues.
+   */
+  const domains = db
+    .prepare(
+      `SELECT COUNT(*) AS n FROM sites
+        WHERE archived = 0 AND owner_id = ? AND priority < 99
+          AND NOT (status_video = 'live' AND status_display = 'live' AND status_ads_txt = 'live'
+                   AND status_ad_tag = 'live' AND status_mcm = 'live')`
+    )
+    .get(req.user.id).n;
+  if (domains) {
+    items.push({
+      key: 'domains',
+      n: domains,
+      label: domains === 1 ? '1 domain of yours is not live yet' : `${domains} domains of yours are not live yet`,
+      to: `/sites?owner=${req.user.id}`,
+    });
+  }
+
   if (req.user.role === 'partner') {
     // Fixed and handed back: nothing moves until the partner looks.
     const n = db.prepare(`SELECT COUNT(*) AS n ${from} WHERE ${live} AND i.status = 'ready_for_qa'`).get().n;
@@ -383,12 +404,17 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
 
 /** Sheet-compatible export, so the old workbook can still be produced on demand. */
 metaRouter.get('/export.csv', (_req, res) => {
-  const sites = db.prepare('SELECT * FROM sites ORDER BY priority, domain').all();
+  const sites = db
+    .prepare(
+      `SELECT s.*, o.name AS owner_name FROM sites s
+       LEFT JOIN users o ON o.id = s.owner_id ORDER BY s.priority, s.domain`
+    )
+    .all();
   const header = [
     'PRIO', 'Domain', 'STATUS (video)', 'STATUS (display)', 'TEST URL', 'Ads.txt (ManagerDomain)',
     'STATUS (ads.txt & ad tag)', 'MCM', 'CMP', 'Demand partner approval',
     'Previous Session RPM', 'Previous RPM currency', 'Primis Session RPM', 'Primis RPM currency',
-    'Managed by', 'Open issues', 'Latest message',
+    'Responsible', 'Managed by', 'Open issues', 'Latest message',
   ];
   const latestMessage = new Map(
     db
@@ -420,7 +446,7 @@ metaRouter.get('/export.csv', (_req, res) => {
     label(TRACK_STATUS, s.status_ads_txt), label(TRACK_STATUS, s.status_ad_tag), label(TRACK_STATUS, s.status_mcm),
     label(CMP, s.cmp), label(APPROVAL, s.approval),
     s.rpm_previous ?? '', s.rpm_previous_currency, s.rpm_primis ?? '', s.rpm_primis_currency,
-    s.managed_by, openCounts.get(s.id) ?? 0, latestMessage.get(s.id) ?? '',
+    s.owner_name ?? '', s.managed_by, openCounts.get(s.id) ?? 0, latestMessage.get(s.id) ?? '',
   ]);
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
