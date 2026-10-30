@@ -121,13 +121,16 @@ app.use((err, _req, res, _next) => {
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const port = Number(process.env.PORT ?? 4000);
+  // Behind nginx this is 127.0.0.1, so the plain-HTTP port is not reachable from
+  // outside and nobody can go around the certificate. Unset, every interface.
+  const host = process.env.HOST || undefined;
   // Keeps the EUR/USD reference rate current without anyone having to think about it.
   if (process.env.DISABLE_FX_REFRESH !== '1') startDailyRefresh();
   // No-op until an admin sets a webhook URL in Settings.
   if (process.env.DISABLE_DIGEST !== '1') startDailyDigest();
 
-  app.listen(port, () => {
-    console.log(`Integration Tracker API on http://localhost:${port}`);
+  app.listen(port, host, () => {
+    console.log(`Integration Tracker API on http://${host ?? 'localhost'}:${port}`);
     if (!existsSync(clientDist)) console.log('No client build found - run `npm run dev` for the UI.');
   });
 }

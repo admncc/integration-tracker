@@ -47,12 +47,17 @@ Set at least:
 
 ```ini
 PORT=4000
+HOST=127.0.0.1
 TRUST_PROXY=1
 SEED_PASSWORD=<a long password you choose>
 ```
 
 `TRUST_PROXY=1` matters: without it the app sees nginx as the client, so
 sign-in throttling counts everyone as one address.
+
+`HOST=127.0.0.1` keeps the Node port off the public network, so the only way in
+is through nginx and its certificate. Leave it out only while you run without
+nginx and open `http://<server-ip>:4000` directly.
 
 `.env` is read both by the service and by `npm run seed`, as long as you run
 them from `/opt/integration-tracker`. Anything already set in the environment
@@ -122,6 +127,22 @@ sudo ufw allow OpenSSH
 sudo ufw allow 'Nginx Full'
 sudo ufw enable
 ```
+
+### Moving an existing installation from `http://<ip>:4000` to a domain
+
+The data stays where it is; only the way in changes.
+
+1. The domain's A record points at the server (`dig +short <domain>` on your
+   own machine shows the server's IP). Ports 80 and 443 are open in any
+   firewall in front of the server, including the hosting provider's.
+2. Run the nginx and certbot steps above with your domain.
+3. In `.env`: add `HOST=127.0.0.1` and `TRUST_PROXY=1`, and remove
+   `INSECURE_COOKIES=1` if it is there. Then
+   `sudo systemctl restart integration-tracker`.
+4. `http://<ip>:4000` stops answering - that is the point. Everybody signs in
+   once more at `https://<domain>`; the old session cookie belonged to the IP.
+5. Settings -> Daily digest -> Tracker address: `https://<domain>`, so the
+   links in the Slack/Teams message lead to the new address.
 
 ## 7. First sign-in
 
@@ -273,7 +294,9 @@ the database is on the new schema. Restore the backup as well.
 | Service restarts in a loop | `journalctl -u integration-tracker -n 50`. A bad `.env` line, `data/` not writable by `tracker`, or a migration that could not finish - the log names it. See "Updating" for going back |
 | A restore brought back the data you were trying to undo | `tracker.db-wal` was left in place and SQLite replayed it. Stop the service, restore again, delete `tracker.db-wal` and `tracker.db-shm`, start |
 | Everything reads fine but nothing saves, and sign-in 500s | The disk is full. `df -h`, then clear space - old backups, `journalctl --vacuum-time=7d`. Reads keep working, so the app looks alive; writes, sessions and sign-in do not. Nothing is corrupted and it recovers as soon as there is space |
-| 502 from nginx | the service is down, or `PORT` in `.env` does not match `proxy_pass` |
+| 502 from nginx | the service is down, or `PORT` in `.env` does not match `proxy_pass`, or `HOST` is set to something other than `127.0.0.1` |
+| certbot fails with "Timeout during connect" or "unauthorized" | Port 80 is closed somewhere in front of the server, or the domain does not yet resolve to it everywhere - certbot checks from several places on the internet. Wait for the DNS TTL and try again |
+| `nginx -t` fine, but the domain shows a parking page | DNS still points at the old address in that resolver's cache; a few minutes up to the record's TTL |
 | 413 when uploading a file | `client_max_body_size` missing from the nginx server block, or below the 25 MB app limit |
 | A domain has vanished from the list | It was archived. Open it directly at `/sites/<id>`, or tick "Show archived" on the Sites page, and use "Bring it back" |
 | The dashboard and the issue list show different counts | They should not any more; both exclude archived domains. Tick "Include archived domains" on the Issues page to see the rest |
