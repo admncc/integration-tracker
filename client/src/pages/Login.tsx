@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useSession } from '../lib/session';
 import { Button, Field } from '../components/ui';
+import { Logo } from '../components/Logo';
 
 export default function Login() {
   const { signIn, expired } = useSession();
@@ -25,9 +26,10 @@ export default function Login() {
   return (
     <div className="grid min-h-full place-items-center px-4">
       <form onSubmit={submit} className="card w-full max-w-sm space-y-4 p-6 shadow-sm">
-        <div className="space-y-1">
-          <div className="grid size-8 place-items-center rounded-lg bg-brand text-sm font-semibold text-white">IT</div>
-          <h1 className="pt-2 text-lg font-semibold">Integration Tracker</h1>
+        <div className="space-y-3">
+          <h1>
+            <Logo size="lg" />
+          </h1>
           <p className="text-sm text-ink-soft">Site rollout and QA between the publisher and the demand partner.</p>
         </div>
 

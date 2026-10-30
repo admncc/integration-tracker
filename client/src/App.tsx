@@ -1,7 +1,8 @@
-import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { useSession } from './lib/session';
 import { Spinner } from './components/ui';
 import Inbox from './components/Inbox';
+import { Logo } from './components/Logo';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import SitesPage from './pages/SitesPage';
@@ -29,10 +30,9 @@ export default function App() {
     <div className="flex min-h-full flex-col">
       <header className="sticky top-0 z-30 border-b border-line bg-surface/85 backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5">
-          <div className="flex items-center gap-2 font-semibold">
-            <span className="grid size-6 place-items-center rounded bg-brand text-xs text-white">IT</span>
-            <span className="text-sm">Integration Tracker</span>
-          </div>
+          <Link to="/" aria-label="Integration Tracker - dashboard" className="rounded-lg">
+            <Logo />
+          </Link>
 
           <nav className="flex items-center gap-1">
             {NAV.filter((item) => !item.adminOnly || user.role === 'admin').map((item) => (

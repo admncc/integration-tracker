@@ -1,5 +1,12 @@
 # Integration Tracker
 
+<img src="client/public/logo.svg" width="48" alt="Digital Marketing Corp">
+
+*by Digital Marketing Corp.* The logo lives in `client/public/`: `logo.svg` (the
+mark, also the favicon), `logo-full.svg` (mark with the company name),
+`logo-512.png` and `apple-touch-icon.png`. Inside the app it is drawn by
+`client/src/components/Logo.tsx`.
+
 A shared workspace for rolling sites out with a demand partner. It replaces the
 Google Sheet plus e-mail thread: every domain has a status per integration
 track, the partner raises QA issues against a specific domain, developers work
