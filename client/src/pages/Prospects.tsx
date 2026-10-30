@@ -1,31 +1,65 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
-import type { Prospect, ProspectImport, ProspectStatus } from '../lib/types';
-import { PROSPECT_STATUS } from '@shared/domain.js';
+import type { DomainStatus, ProjectStatus, Prospect, ProspectImport } from '../lib/types';
+import { DOMAIN_STATUS, PROJECT_STATUS } from '@shared/domain.js';
 import { Button, Empty, InlineSelect, Modal, Spinner, type Tone } from '../components/ui';
 
-const STATUS_OPTIONS = (Object.entries(PROSPECT_STATUS) as [ProspectStatus, { label: string; tone: string }][]).map(
-  ([value, meta]) => ({ value, label: meta.label })
-);
+type StatusMap = Record<string, { label: string; tone: string }>;
+
+const optionsOf = <T extends string>(map: StatusMap) =>
+  Object.entries(map).map(([value, meta]) => ({ value: value as T, label: meta.label }));
+
+const PROJECT_OPTIONS = optionsOf<ProjectStatus>(PROJECT_STATUS);
+const DOMAIN_OPTIONS = optionsOf<DomainStatus>(DOMAIN_STATUS);
+
+/**
+ * A drawn star rather than the ★ character: on some systems that glyph comes
+ * from a symbol font that ignores the text colour, so a marked row showed a
+ * black star instead of an amber one.
+ */
+function Star({ filled, className = '' }: { filled: boolean; className?: string }) {
+  return (
+    <svg viewBox="0 0 20 20" aria-hidden className={`inline-block size-4 ${className}`}>
+      <path
+        d="M10 1.8l2.47 5.3 5.78.62-4.3 3.92 1.2 5.7L10 14.4l-5.15 2.94 1.2-5.7-4.3-3.92 5.78-.62L10 1.8z"
+        fill={filled ? 'currentColor' : 'none'}
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+/** The two statuses, described once so the table, filters and bulk bar agree. */
+const FIELDS = [
+  { key: 'project_status', label: 'Project status', map: PROJECT_STATUS as StatusMap, options: PROJECT_OPTIONS },
+  { key: 'domain_status', label: 'Domain status', map: DOMAIN_STATUS as StatusMap, options: DOMAIN_OPTIONS },
+] as const;
+
+type FieldKey = (typeof FIELDS)[number]['key'];
 
 /**
  * Potential projects: candidate domains and where each one stands.
  *
- * Two columns on purpose - a domain and a status - because this is a list to
- * sort through, not a rollout to run. A domain that works out is added on the
- * Sites tab, where the rollout columns are.
+ * Two questions, kept apart because they move independently: where the project
+ * stands with us (new, live, removed) and how the domain itself came out of the
+ * check (submitted for approval, good, mostly blocked). A domain that works out
+ * is added on the Sites tab, where the rollout columns are.
  */
 export default function Prospects() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
   const [notice, setNotice] = useState<{ tone: 'red' | 'green'; text: string } | null>(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<ProspectStatus | 'all'>('all');
+  const [filters, setFilters] = useState<Record<FieldKey, string>>({ project_status: 'all', domain_status: 'all' });
+  const [onlyHigh, setOnlyHigh] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [importing, setImporting] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [bulkStatus, setBulkStatus] = useState<ProspectStatus>('removed');
+  const [bulkField, setBulkField] = useState<FieldKey>('project_status');
+  const [bulkValue, setBulkValue] = useState<string>('removed');
 
   useEffect(() => {
     api
@@ -41,18 +75,18 @@ export default function Prospects() {
     return () => clearTimeout(timer);
   }, [notice]);
 
-  const counts = useMemo(() => {
-    const result: Record<string, number> = { all: prospects.length };
-    for (const key of Object.keys(PROSPECT_STATUS)) result[key] = prospects.filter((p) => p.status === key).length;
-    return result;
-  }, [prospects]);
-
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return prospects.filter(
-      (p) => (statusFilter === 'all' || p.status === statusFilter) && (!term || p.domain.includes(term))
+      (p) =>
+        (filters.project_status === 'all' || p.project_status === filters.project_status) &&
+        (filters.domain_status === 'all' || p.domain_status === filters.domain_status) &&
+        (!onlyHigh || p.high_potential === 1) &&
+        (!term || p.domain.includes(term))
     );
-  }, [prospects, search, statusFilter]);
+  }, [prospects, search, filters, onlyHigh]);
+
+  const highCount = prospects.filter((p) => p.high_potential === 1).length;
 
   // A selection that the filter now hides would be acted on unseen.
   const hiddenSelected = [...selected].filter((id) => !visible.some((p) => p.id === id)).length;
@@ -76,14 +110,36 @@ export default function Prospects() {
     });
   }
 
-  async function setStatus(ids: number[], status: ProspectStatus) {
+  async function setStatus(ids: number[], field: FieldKey, value: string) {
     setBusy(true);
     setNotice(null);
     try {
-      const r = await api.patch<{ changed: number; prospects: Prospect[] }>('/prospects/bulk', { ids, status });
+      const r = await api.patch<{ changed: number; prospects: Prospect[] }>('/prospects/bulk', { ids, [field]: value });
       setProspects(r.prospects);
       if (ids.length > 1) {
-        setNotice({ tone: 'green', text: `${PROSPECT_STATUS[status].label} set on ${r.changed} domain(s)` });
+        const meta = FIELDS.find((f) => f.key === field)!;
+        setNotice({ tone: 'green', text: `${meta.label} set to ${meta.map[value].label} on ${r.changed} domain(s)` });
+        setSelected(new Set());
+      }
+    } catch (err) {
+      setNotice({ tone: 'red', text: err instanceof Error ? err.message : 'Could not save' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Marks or unmarks high potential; the server re-sorts, so they move to the top. */
+  async function setHighPotential(ids: number[], value: boolean) {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await api.patch<{ changed: number; prospects: Prospect[] }>('/prospects/bulk', { ids, high_potential: value });
+      setProspects(r.prospects);
+      if (ids.length > 1) {
+        setNotice({
+          tone: 'green',
+          text: value ? `${r.changed} domain(s) marked as high potential` : `High potential removed from ${r.changed} domain(s)`,
+        });
         setSelected(new Set());
       }
     } catch (err) {
@@ -95,7 +151,7 @@ export default function Prospects() {
 
   async function deleteSelected() {
     const ids = [...selected];
-    if (!window.confirm(`Delete ${ids.length} domain(s) from the list for good?\n\nSetting them to REMOVED keeps the record instead.`)) return;
+    if (!window.confirm(`Delete ${ids.length} domain(s) from the list for good?\n\nA project status of REMOVED keeps the record instead.`)) return;
     setBusy(true);
     setNotice(null);
     try {
@@ -109,6 +165,8 @@ export default function Prospects() {
       setBusy(false);
     }
   }
+
+  const bulkMeta = FIELDS.find((f) => f.key === bulkField)!;
 
   if (loading) return <Spinner />;
 
@@ -134,18 +192,40 @@ export default function Prospects() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-1.5 text-xs">
-        {(['all', ...Object.keys(PROSPECT_STATUS)] as (ProspectStatus | 'all')[]).map((key) => (
+      <div className="space-y-1.5">
+        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="w-28 shrink-0 text-ink-faint">Potential</span>
           <button
-            key={key}
-            onClick={() => setStatusFilter(key)}
-            aria-pressed={statusFilter === key}
+            onClick={() => setOnlyHigh(!onlyHigh)}
+            aria-pressed={onlyHigh}
             className={`rounded-full border px-2.5 py-1 font-medium transition ${
-              statusFilter === key ? 'border-brand bg-brand-soft text-brand-ink' : 'border-line text-ink-soft hover:bg-raised'
+              onlyHigh ? 'border-tone-amber bg-tone-amber-bg text-tone-amber' : 'border-line text-ink-soft hover:bg-raised'
             }`}
           >
-            {key === 'all' ? 'All' : PROSPECT_STATUS[key].label} ({counts[key] ?? 0})
+            <Star filled className="mr-1 -mt-0.5 size-3.5" />
+            High potential only ({highCount})
           </button>
+        </div>
+        {FIELDS.map((field) => (
+          <div key={field.key} className="flex flex-wrap items-center gap-1.5 text-xs">
+            <span className="w-28 shrink-0 text-ink-faint">{field.label}</span>
+            {['all', ...Object.keys(field.map)].map((value) => {
+              const n = value === 'all' ? prospects.length : prospects.filter((p) => p[field.key] === value).length;
+              const active = filters[field.key] === value;
+              return (
+                <button
+                  key={value}
+                  onClick={() => setFilters((current) => ({ ...current, [field.key]: value }))}
+                  aria-pressed={active}
+                  className={`rounded-full border px-2.5 py-1 font-medium transition ${
+                    active ? 'border-brand bg-brand-soft text-brand-ink' : 'border-line text-ink-soft hover:bg-raised'
+                  }`}
+                >
+                  {value === 'all' ? 'All' : field.map[value].label} ({n})
+                </button>
+              );
+            })}
+          </div>
         ))}
       </div>
 
@@ -161,21 +241,49 @@ export default function Prospects() {
             {selected.size} selected
             {hiddenSelected > 0 && `, ${hiddenSelected} of them not in the current filter`}
           </span>
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs text-brand-ink">Set status to</span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-xs text-brand-ink">Set</span>
             <select
               className="field !w-auto !py-1 text-xs"
-              value={bulkStatus}
-              onChange={(event) => setBulkStatus(event.target.value as ProspectStatus)}
+              aria-label="Which status to set"
+              value={bulkField}
+              onChange={(event) => {
+                const next = event.target.value as FieldKey;
+                setBulkField(next);
+                // A value from one list means nothing in the other.
+                setBulkValue(FIELDS.find((f) => f.key === next)!.options[0].value);
+              }}
             >
-              {STATUS_OPTIONS.map((option) => (
+              {FIELDS.map((field) => (
+                <option key={field.key} value={field.key}>
+                  {field.label}
+                </option>
+              ))}
+            </select>
+            <span className="text-xs text-brand-ink">to</span>
+            <select
+              className="field !w-auto !py-1 text-xs"
+              aria-label="Status to set"
+              value={bulkValue}
+              onChange={(event) => setBulkValue(event.target.value)}
+            >
+              {bulkMeta.options.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
-            <Button size="sm" disabled={busy} onClick={() => setStatus([...selected], bulkStatus)}>
+            <Button size="sm" disabled={busy} onClick={() => setStatus([...selected], bulkField, bulkValue)}>
               Apply to {selected.size}
+            </Button>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button size="sm" disabled={busy} onClick={() => setHighPotential([...selected], true)}>
+              <Star filled className="size-3.5 text-tone-amber" />
+              Mark high potential
+            </Button>
+            <Button size="sm" disabled={busy} onClick={() => setHighPotential([...selected], false)}>
+              Unmark
             </Button>
           </div>
           <Button size="sm" variant="danger" disabled={busy} onClick={deleteSelected}>
@@ -192,8 +300,10 @@ export default function Prospects() {
           No potential projects yet. Use <span className="font-medium">+ Add domains</span> to paste a list or upload a .txt file.
         </Empty>
       ) : (
-        <div className="card overflow-hidden">
-          <table className="w-full table-fixed border-collapse text-sm">
+        // The domain-status labels are long; on a phone the table scrolls
+        // inside its card rather than pushing the whole page sideways.
+        <div className="card overflow-x-auto">
+          <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
             <thead>
               <tr className="border-b border-line bg-raised text-left">
                 <th className="w-10 px-3 py-2">
@@ -204,14 +314,28 @@ export default function Prospects() {
                     onChange={toggleAllVisible}
                   />
                 </th>
+                <th className="w-10 px-1 py-2 text-center font-medium text-ink-soft" title="High potential">
+                  <Star filled={false} className="text-ink-faint" />
+                  <span className="sr-only">High potential</span>
+                </th>
                 <th className="px-3 py-2 font-medium text-ink-soft">Domain</th>
-                <th className="w-48 px-3 py-2 font-medium text-ink-soft">Status</th>
+                <th className="w-40 px-3 py-2 font-medium text-ink-soft">Project status</th>
+                <th className="w-80 px-3 py-2 font-medium text-ink-soft">Domain status</th>
               </tr>
             </thead>
             <tbody>
               {visible.map((prospect) => (
-                <tr key={prospect.id} className={`border-b border-line last:border-0 ${selected.has(prospect.id) ? 'bg-brand-soft/40' : ''}`}>
-                  <td className="px-3 py-1.5">
+                <tr
+                  key={prospect.id}
+                  className={`border-b border-line last:border-0 ${
+                    selected.has(prospect.id)
+                      ? 'bg-brand-soft/40'
+                      : prospect.high_potential
+                        ? 'bg-tone-amber-bg/50'
+                        : ''
+                  }`}
+                >
+                  <td className={`px-3 py-1.5 ${prospect.high_potential ? 'border-l-4 border-l-tone-amber' : ''}`}>
                     <input
                       type="checkbox"
                       aria-label={`Select ${prospect.domain}`}
@@ -219,8 +343,27 @@ export default function Prospects() {
                       onChange={() => toggle(prospect.id)}
                     />
                   </td>
-                  <td className="truncate px-3 py-1.5">
-                    <span className={prospect.status === 'removed' ? 'text-ink-faint line-through decoration-1' : 'font-medium'}>
+                  <td className="px-1 py-1.5 text-center">
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => setHighPotential([prospect.id], !prospect.high_potential)}
+                      aria-pressed={prospect.high_potential === 1}
+                      aria-label={`${prospect.high_potential ? 'Unmark' : 'Mark'} ${prospect.domain} as high potential`}
+                      title={prospect.high_potential ? 'High potential - click to unmark' : 'Mark as high potential'}
+                      className={`grid place-items-center rounded p-0.5 transition ${
+                        prospect.high_potential ? 'text-tone-amber' : 'text-ink-faint hover:text-tone-amber'
+                      }`}
+                    >
+                      <Star filled={prospect.high_potential === 1} className="size-[18px]" />
+                    </button>
+                  </td>
+                  <td className="truncate px-3 py-1.5" title={prospect.domain}>
+                    <span
+                      className={
+                        prospect.project_status === 'removed' ? 'text-ink-faint line-through decoration-1' : 'font-medium'
+                      }
+                    >
                       {prospect.domain}
                     </span>
                     {prospect.site_id != null && (
@@ -229,21 +372,24 @@ export default function Prospects() {
                       </Link>
                     )}
                   </td>
-                  <td className="px-3 py-1.5">
-                    <InlineSelect
-                      value={prospect.status}
-                      options={STATUS_OPTIONS}
-                      tone={PROSPECT_STATUS[prospect.status].tone as Tone}
-                      disabled={busy}
-                      onChange={(next) => setStatus([prospect.id], next)}
-                    />
-                  </td>
+                  {FIELDS.map((field) => (
+                    <td key={field.key} className="px-3 py-1.5">
+                      <InlineSelect
+                        value={prospect[field.key]}
+                        options={field.options as { value: string; label: string }[]}
+                        tone={field.map[prospect[field.key]].tone as Tone}
+                        disabled={busy}
+                        title={`${field.label} of ${prospect.domain}`}
+                        onChange={(next) => setStatus([prospect.id], field.key, next)}
+                      />
+                    </td>
+                  ))}
                 </tr>
               ))}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="px-3 py-6 text-center text-sm text-ink-faint">
-                    No domain matches this filter.
+                  <td colSpan={5} className="px-3 py-6 text-center text-sm text-ink-faint">
+                    No domain matches these filters.
                   </td>
                 </tr>
               )}
@@ -281,7 +427,8 @@ export default function Prospects() {
  */
 function ImportModal({ onClose, onImported }: { onClose: () => void; onImported: (result: ProspectImport) => void }) {
   const [text, setText] = useState('');
-  const [status, setStatus] = useState<ProspectStatus>('new');
+  const [projectStatus, setProjectStatus] = useState<ProjectStatus>('new');
+  const [domainStatus, setDomainStatus] = useState<DomainStatus>('new');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const fileInput = useRef<HTMLInputElement>(null);
@@ -306,7 +453,9 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
     setBusy(true);
     setError('');
     try {
-      onImported(await api.post<ProspectImport>('/prospects/import', { text, status }));
+      onImported(
+        await api.post<ProspectImport>('/prospects/import', { text, project_status: projectStatus, domain_status: domainStatus })
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not import the list');
     } finally {
@@ -337,17 +486,40 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
             onChange={(event) => readFile(event.target.files?.[0])}
             className="text-xs text-ink-soft file:mr-2 file:rounded-lg file:border file:border-line-strong file:bg-raised file:px-2 file:py-1 file:text-xs"
           />
-          <label className="flex items-center gap-1.5 text-sm text-ink-soft">
-            Add them as
-            <select className="field !w-auto !py-1 text-sm" value={status} onChange={(event) => setStatus(event.target.value as ProspectStatus)}>
-              {STATUS_OPTIONS.map((option) => (
+          <span className="ml-auto text-xs text-ink-faint">
+            {count} entr{count === 1 ? 'y' : 'ies'}
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-4 text-sm text-ink-soft">
+          <label className="flex items-center gap-1.5">
+            Project status
+            <select
+              className="field !w-auto !py-1 text-sm"
+              value={projectStatus}
+              onChange={(event) => setProjectStatus(event.target.value as ProjectStatus)}
+            >
+              {PROJECT_OPTIONS.map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
           </label>
-          <span className="ml-auto text-xs text-ink-faint">{count} entr{count === 1 ? 'y' : 'ies'}</span>
+          <label className="flex items-center gap-1.5">
+            Domain status
+            <select
+              className="field !w-auto !py-1 text-sm"
+              value={domainStatus}
+              onChange={(event) => setDomainStatus(event.target.value as DomainStatus)}
+            >
+              {DOMAIN_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{error}</p>}

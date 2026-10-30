@@ -168,13 +168,15 @@ CREATE INDEX IF NOT EXISTS idx_activity_issue ON activity(issue_id, id DESC);
 -- Potential projects: candidate domains, before any of them becomes a site.
 CREATE TABLE IF NOT EXISTS prospects (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
-  domain     TEXT NOT NULL UNIQUE,
-  status     TEXT NOT NULL DEFAULT 'new',
-  added_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  domain         TEXT NOT NULL UNIQUE,
+  project_status TEXT NOT NULL DEFAULT 'new',
+  domain_status  TEXT NOT NULL DEFAULT 'new',
+  -- Marked as high potential: highlighted and kept at the top of the list.
+  high_potential INTEGER NOT NULL DEFAULT 0,
+  added_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX IF NOT EXISTS idx_prospects_status ON prospects(status);
 `);
 
 /*
@@ -196,6 +198,10 @@ const LATE_COLUMNS = [
   ['users', 'inbox_seen_message_id', 'INTEGER NOT NULL DEFAULT 0'],
   // Who is answerable for the domain.
   ['sites', 'owner_id', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'],
+  // The single prospect status became two.
+  ['prospects', 'project_status', "TEXT NOT NULL DEFAULT 'new'"],
+  ['prospects', 'domain_status', "TEXT NOT NULL DEFAULT 'new'"],
+  ['prospects', 'high_potential', 'INTEGER NOT NULL DEFAULT 0'],
 ];
 
 for (const [table, column, definition] of LATE_COLUMNS) {
@@ -350,6 +356,23 @@ db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)
  */
 db.exec('CREATE INDEX IF NOT EXISTS idx_issues_batch ON issues(batch_id)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_sites_owner ON sites(owner_id)');
+
+/*
+ * Potential projects first had one status (NEW / MOSTLY BLOCKED / REMOVED);
+ * it split into a project status and a domain status. Each old value goes to
+ * the question it was answering: REMOVED was about the project, MOSTLY BLOCKED
+ * about the domain. Runs once; the old column is left in place, unread.
+ */
+const prospectColumns = db.prepare('PRAGMA table_info(prospects)').all().map((c) => c.name);
+if (prospectColumns.includes('status') && !getSetting('prospect_status_split')) {
+  db.exec(`
+    UPDATE prospects SET project_status = 'removed' WHERE status = 'removed';
+    UPDATE prospects SET domain_status = 'mostly_blocked' WHERE status = 'mostly_blocked';
+  `);
+  setSetting('prospect_status_split', '1');
+}
+db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_project ON prospects(project_status)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_domain ON prospects(domain_status)');
 
 /*
  * Rows created under the old USD default that nobody has entered a figure for

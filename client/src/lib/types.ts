@@ -186,13 +186,17 @@ export interface RpmRow {
   uplift: number;
 }
 
-export type ProspectStatus = 'new' | 'mostly_blocked' | 'removed';
+export type ProjectStatus = 'new' | 'live' | 'removed';
+export type DomainStatus = 'new' | 'submitted' | 'good' | 'mostly_blocked';
 
 /** A candidate domain on the potential-projects list. */
 export interface Prospect {
   id: number;
   domain: string;
-  status: ProspectStatus;
+  project_status: ProjectStatus;
+  domain_status: DomainStatus;
+  /** 1 when marked as high potential: highlighted and listed first. */
+  high_potential: number;
   created_at: string;
   updated_at: string;
   added_by_name: string | null;

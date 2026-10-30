@@ -217,9 +217,19 @@ export function siteCompletion(site) {
  * The list before the list: domains that might become a project. Kept apart
  * from the sites table so a pasted batch of 300 candidates never touches the
  * rollout numbers, the dashboard or anybody's "waiting on you".
+ *
+ * Two questions, answered separately: where the project stands with us, and
+ * how the domain itself came out of the check.
  */
-export const PROSPECT_STATUS = {
-  new:            { label: 'NEW',            tone: 'blue'  },
-  mostly_blocked: { label: 'MOSTLY BLOCKED', tone: 'amber' },
-  removed:        { label: 'REMOVED',        tone: 'muted' },
+export const PROJECT_STATUS = {
+  new:     { label: 'NEW',     tone: 'blue'  },
+  live:    { label: 'LIVE',    tone: 'green' },
+  removed: { label: 'REMOVED', tone: 'muted' },
+};
+
+export const DOMAIN_STATUS = {
+  new:            { label: 'NEW',                             tone: 'blue'   },
+  submitted:      { label: 'DOMAIN SUBMITTED FOR APPROVAL',   tone: 'purple' },
+  good:           { label: 'GOOD',                            tone: 'green'  },
+  mostly_blocked: { label: 'MOSTLY BLOCKED',                  tone: 'amber'  },
 };
