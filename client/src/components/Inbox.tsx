@@ -65,16 +65,28 @@ export default function Inbox() {
         onClick={() => setOpen(!open)}
         aria-expanded={open}
         title={waiting ? `${waiting} thing(s) waiting on you` : 'Nothing waiting on you'}
-        className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium transition ${
+        className={`flex items-center gap-1.5 whitespace-nowrap rounded-lg px-2.5 py-1.5 text-sm font-medium transition ${
           waiting ? 'bg-tone-red-bg text-tone-red hover:brightness-95' : 'text-ink-soft hover:bg-raised hover:text-ink'
         }`}
       >
         <span aria-hidden>{waiting ? '●' : '○'}</span>
-        {waiting ? `${waiting} waiting on you` : 'Nothing waiting'}
+        {/* On a phone the count alone, so the header stays on one line. */}
+        {waiting ? (
+          <>
+            {waiting}
+            <span className="max-sm:sr-only"> waiting on you</span>
+          </>
+        ) : (
+          <>
+            <span className="max-sm:sr-only">Nothing waiting</span>
+            <span aria-hidden className="sm:hidden">0</span>
+          </>
+        )}
       </button>
 
       {open && (
-        <div className="absolute right-0 z-40 mt-1 w-72 rounded-xl border border-line bg-surface p-2 shadow-lg">
+        // A phone has no room for a 288px panel hanging off a button in the middle of the header, so there it spans the width.
+        <div className="absolute right-0 z-40 mt-1 w-72 rounded-xl border border-line bg-surface p-2 shadow-lg max-sm:fixed max-sm:inset-x-3 max-sm:w-auto">
           {data.items.length === 0 ? (
             <p className="px-2 py-3 text-sm text-ink-soft">
               Nothing is waiting on you. {data.open > 0 ? `${data.open} issue(s) open across the network.` : 'Nothing open at all.'}

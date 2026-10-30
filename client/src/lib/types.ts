@@ -132,6 +132,8 @@ export interface ActivityEntry {
   actor_name: string | null;
   domain?: string | null;
   issue_title?: string | null;
+  /** The person a responsible/assignee change points at (dashboard feed only). */
+  new_person?: string | null;
   kind: string;
   field: string | null;
   old_value: string | null;

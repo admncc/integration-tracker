@@ -59,14 +59,14 @@ const tonesOf = (map: Record<string, { tone: string }>) =>
  */
 const COLUMNS: Column[] = [
   { key: 'priority', label: 'Prio', kind: 'number', weight: 4.7 },
-  { key: 'domain', label: 'Domain', kind: 'text', weight: 11.5 },
+  { key: 'domain', label: 'Domain', kind: 'text', weight: 16 },
   ...TRACKS.map((track) => ({
     key: track.key,
     label: track.label,
     kind: 'enum' as const,
     options: STATUS_OPTIONS,
     tones: tonesOf(TRACK_STATUS),
-    weight: 8.7,
+    weight: 7.8,
   })),
   { key: 'cmp', label: 'CMP', kind: 'enum', options: CMP_OPTIONS, tones: tonesOf(CMP), weight: 5.5, tier: 2 },
   { key: 'approval', label: 'Approval', kind: 'enum', options: APPROVAL_OPTIONS, tones: tonesOf(APPROVAL), weight: 8.5, tier: 2 },
@@ -375,7 +375,7 @@ export default function Sites() {
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <input
-            className="field w-56"
+            className="field w-56 max-sm:w-full"
             placeholder="Search domain or owner..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -416,7 +416,7 @@ export default function Sites() {
             <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} />
             Show archived
           </label>
-          <a href="/api/export.csv" className="rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-raised">
+          <a href="/api/export.csv" className="whitespace-nowrap rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-raised">
             Export CSV
           </a>
           {can('manage_sites') && (
@@ -485,8 +485,13 @@ export default function Sites() {
         </div>
       )}
 
-      <div className="card overflow-hidden">
-        <table className="w-full table-fixed border-collapse text-sm">
+      {/*
+       * Below about 1000px even the remaining columns cannot shrink any further
+       * without the track selects turning into bare chevrons, so on a tablet or
+       * a phone the table keeps that width and scrolls inside its card.
+       */}
+      <div className="card overflow-x-auto">
+        <table className="w-full min-w-[980px] table-fixed border-collapse text-sm">
           <thead>
             <tr className="border-b border-line bg-raised">
               <th className="bg-raised px-2 py-2" style={{ width: widthOf(SELECT_COLUMN_WEIGHT) }}>
@@ -510,7 +515,7 @@ export default function Sites() {
             <tr className="border-b border-line bg-surface">
               <th className="bg-surface" />
               {columns.map((column) => (
-                <th key={column.key} className="overflow-hidden px-1.5 py-1.5">
+                <th key={column.key} className="overflow-hidden px-1.5 py-1.5 font-normal">
                   <ColumnFilter
                     column={column}
                     value={filters[column.key] ?? ''}
@@ -733,7 +738,7 @@ function Cell({
 function ColumnFilter({ column, value, onChange }: { column: Column; value: string; onChange: (value: string) => void }) {
   if (column.kind === 'enum') {
     return (
-      <select className="field !py-1 text-xs" value={value} onChange={(event) => onChange(event.target.value)} aria-label={`Filter ${column.label}`}>
+      <select className="field !px-1.5 !py-1 text-xs" value={value} onChange={(event) => onChange(event.target.value)} aria-label={`Filter ${column.label}`}>
         <option value="">All</option>
         {column.options?.map((option) => (
           <option key={option.value} value={option.value}>
@@ -746,7 +751,7 @@ function ColumnFilter({ column, value, onChange }: { column: Column; value: stri
 
   if (column.kind === 'uplift') {
     return (
-      <select className="field !py-1 text-xs" value={value} onChange={(event) => onChange(event.target.value)} aria-label="Filter uplift">
+      <select className="field !px-1.5 !py-1 text-xs" value={value} onChange={(event) => onChange(event.target.value)} aria-label="Filter uplift">
         <option value="">All</option>
         <option value="up">Better with Primis</option>
         <option value="down">Worse or flat</option>
@@ -757,7 +762,7 @@ function ColumnFilter({ column, value, onChange }: { column: Column; value: stri
 
   if (column.kind === 'issues') {
     return (
-      <select className="field !py-1 text-xs" value={value} onChange={(event) => onChange(event.target.value)} aria-label="Filter issues">
+      <select className="field !px-1.5 !py-1 text-xs" value={value} onChange={(event) => onChange(event.target.value)} aria-label="Filter issues">
         <option value="">All</option>
         <option value="any">Has open</option>
         <option value="qa">Awaiting re-check</option>
@@ -769,7 +774,7 @@ function ColumnFilter({ column, value, onChange }: { column: Column; value: stri
 
   return (
     <input
-      className="field !py-1 text-xs"
+      className="field !px-1.5 !py-1 text-xs"
       placeholder={column.kind === 'number' ? '#' : 'Filter'}
       value={value}
       aria-label={`Filter ${column.label}`}

@@ -76,8 +76,18 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Form controls inherit the theme instead of the browser's default chrome. */
-input, select, textarea, button { font: inherit; color: inherit; }
+/*
+ * Form controls inherit the theme instead of the browser's default chrome.
+ *
+ * In the base layer, not loose in the file. Unlayered CSS beats every layer in
+ * Tailwind v4, so this rule used to override every text colour and font size
+ * set on a button, select or input: status pills rendered their label in plain
+ * ink instead of their tone, a primary button's white text came out dark, and
+ * "text-xs" on a control did nothing at all.
+ */
+@layer base {
+  input, select, textarea, button { font: inherit; color: inherit; }
+}
 
 /*
  * Spinner arrows on number inputs eat 15-20px that a dense table cannot spare,

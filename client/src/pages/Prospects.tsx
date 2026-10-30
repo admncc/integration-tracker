@@ -181,7 +181,7 @@ export default function Prospects() {
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <input
-            className="field w-56"
+            className="field w-56 max-sm:w-full"
             placeholder="Search domain..."
             value={search}
             onChange={(event) => setSearch(event.target.value)}
@@ -303,7 +303,7 @@ export default function Prospects() {
         // The domain-status labels are long; on a phone the table scrolls
         // inside its card rather than pushing the whole page sideways.
         <div className="card overflow-x-auto">
-          <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
+          <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
             <thead>
               <tr className="border-b border-line bg-raised text-left">
                 <th className="w-10 px-3 py-2">
@@ -320,7 +320,7 @@ export default function Prospects() {
                 </th>
                 <th className="px-3 py-2 font-medium text-ink-soft">Domain</th>
                 <th className="w-40 px-3 py-2 font-medium text-ink-soft">Project status</th>
-                <th className="w-80 px-3 py-2 font-medium text-ink-soft">Domain status</th>
+                <th className="w-72 px-3 py-2 font-medium text-ink-soft">Domain status</th>
               </tr>
             </thead>
             <tbody>
@@ -335,7 +335,7 @@ export default function Prospects() {
                         : ''
                   }`}
                 >
-                  <td className={`px-3 py-1.5 ${prospect.high_potential ? 'border-l-4 border-l-tone-amber' : ''}`}>
+                  <td className={`px-3 py-1.5 ${prospect.high_potential ? 'shadow-[inset_4px_0_0_var(--color-tone-amber)]' : ''}`}>
                     <input
                       type="checkbox"
                       aria-label={`Select ${prospect.domain}`}
@@ -491,11 +491,11 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
           </span>
         </div>
 
-        <div className="flex flex-wrap items-center gap-4 text-sm text-ink-soft">
-          <label className="flex items-center gap-1.5">
-            Project status
+        <div className="grid gap-3 sm:grid-cols-[auto_1fr]">
+          <label className="block space-y-1">
+            <span className="block text-xs font-medium text-ink-soft">Project status</span>
             <select
-              className="field !w-auto !py-1 text-sm"
+              className="field !py-1"
               value={projectStatus}
               onChange={(event) => setProjectStatus(event.target.value as ProjectStatus)}
             >
@@ -506,10 +506,10 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
               ))}
             </select>
           </label>
-          <label className="flex items-center gap-1.5">
-            Domain status
+          <label className="block space-y-1">
+            <span className="block text-xs font-medium text-ink-soft">Domain status</span>
             <select
-              className="field !w-auto !py-1 text-sm"
+              className="field !py-1"
               value={domainStatus}
               onChange={(event) => setDomainStatus(event.target.value as DomainStatus)}
             >

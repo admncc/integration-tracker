@@ -135,7 +135,7 @@ export default function NetworkIssues({ sites, onIssuesChanged }: { sites: Site[
               <li key={rollout.id} className="flex flex-wrap items-center gap-2 text-sm">
                 <Link
                   to={`/issues?status=all&batch_id=${rollout.id}`}
-                  className="min-w-0 flex-1 truncate font-medium hover:text-brand hover:underline"
+                  className="min-w-0 truncate font-medium hover:text-brand hover:underline max-sm:basis-full max-sm:whitespace-normal sm:flex-1"
                 >
                   {rollout.title}
                 </Link>

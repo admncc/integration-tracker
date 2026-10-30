@@ -114,12 +114,14 @@ metaRouter.get('/stats', (_req, res) => {
 
   const recent = db
     .prepare(
-      `SELECT ac.*, u.name AS actor_name, s.domain, i.title AS issue_title
+      `SELECT ac.*, u.name AS actor_name, s.domain, i.title AS issue_title, np.name AS new_person
          FROM activity ac
          LEFT JOIN users u ON u.id = ac.actor_id
          LEFT JOIN sites s ON s.id = ac.site_id
          LEFT JOIN issues i ON i.id = ac.issue_id
-        ORDER BY ac.id DESC LIMIT 25`
+         -- A responsible or an assignee is stored as a user id; the feed names the person.
+         LEFT JOIN users np ON ac.field IN ('owner_id', 'assignee_id') AND np.id = CAST(ac.new_value AS INTEGER)
+        ORDER BY ac.id DESC LIMIT 15`
     )
     .all();
 

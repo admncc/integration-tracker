@@ -70,7 +70,7 @@ export default function Settings() {
       {notice && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{notice}</p>}
 
       <section className="card">
-        <header className="flex items-center justify-between border-b border-line px-4 py-3">
+        <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-3">
           <div>
             <h2 className="text-sm font-semibold">People</h2>
             <p className="text-xs text-ink-soft">
@@ -82,54 +82,57 @@ export default function Settings() {
           </Button>
         </header>
 
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-xs text-ink-soft">
-              <th className="px-4 py-2 font-medium">Name</th>
-              <th className="px-4 py-2 font-medium">Username</th>
-              <th className="px-4 py-2 font-medium">Company</th>
-              <th className="px-4 py-2 font-medium">Role</th>
-              <th className="px-4 py-2 font-medium">Status</th>
-              <th className="px-4 py-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {users.map((row) => (
-              <tr key={row.id} className="border-b border-line last:border-0">
-                <td className="px-4 py-2 font-medium">
-                  {row.name}
-                  {row.id === user?.id && <span className="ml-2 text-xs text-ink-faint">you</span>}
-                </td>
-                <td className="px-4 py-2 font-mono text-xs">{row.username}</td>
-                <td className="px-4 py-2 text-ink-soft">{row.company || '-'}</td>
-                <td className="px-4 py-2">
-                  <select
-                    className="field !w-auto !py-1 text-xs"
-                    value={roleDraft[row.id] ?? row.role}
-                    onChange={(event) => {
-                      const next = event.target.value as User['role'];
-                      setRoleDraft((current) => ({ ...current, [row.id]: next }));
-                      changeRole(row, next);
-                    }}
-                  >
-                    {ROLE_ENTRIES.map(([value, meta]) => (
-                      <option key={value} value={value}>{meta.label}</option>
-                    ))}
-                  </select>
-                </td>
-                <td className="px-4 py-2">
-                  <Badge tone={row.active ? 'green' : 'muted'}>{row.active ? 'Active' : 'Disabled'}</Badge>
-                </td>
-                <td className="px-4 py-2 text-right whitespace-nowrap">
-                    <Button size="sm" onClick={() => setResetting(row)}>Set password</Button>{' '}
-                  <Button size="sm" variant={row.active ? 'danger' : 'secondary'} onClick={() => toggleActive(row)}>
-                    {row.active ? 'Disable' : 'Enable'}
-                  </Button>
-                </td>
+        {/* Six columns do not fit a phone; the table scrolls inside its card instead of the page. */}
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[720px] text-sm">
+            <thead>
+              <tr className="border-b border-line text-left text-xs text-ink-soft">
+                <th className="px-4 py-2 font-medium">Name</th>
+                <th className="px-4 py-2 font-medium">Username</th>
+                <th className="px-4 py-2 font-medium">Company</th>
+                <th className="px-4 py-2 font-medium">Role</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2" />
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {users.map((row) => (
+                <tr key={row.id} className="border-b border-line last:border-0">
+                  <td className="px-4 py-2 font-medium">
+                    {row.name}
+                    {row.id === user?.id && <span className="ml-2 text-xs text-ink-faint">you</span>}
+                  </td>
+                  <td className="px-4 py-2 font-mono text-xs">{row.username}</td>
+                  <td className="px-4 py-2 text-ink-soft">{row.company || '-'}</td>
+                  <td className="px-4 py-2">
+                    <select
+                      className="field !w-auto !py-1 text-xs"
+                      value={roleDraft[row.id] ?? row.role}
+                      onChange={(event) => {
+                        const next = event.target.value as User['role'];
+                        setRoleDraft((current) => ({ ...current, [row.id]: next }));
+                        changeRole(row, next);
+                      }}
+                    >
+                      {ROLE_ENTRIES.map(([value, meta]) => (
+                        <option key={value} value={value}>{meta.label}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-2">
+                    <Badge tone={row.active ? 'green' : 'muted'}>{row.active ? 'Active' : 'Disabled'}</Badge>
+                  </td>
+                  <td className="px-4 py-2 text-right whitespace-nowrap">
+                      <Button size="sm" onClick={() => setResetting(row)}>Set password</Button>{' '}
+                    <Button size="sm" variant={row.active ? 'danger' : 'secondary'} onClick={() => toggleActive(row)}>
+                      {row.active ? 'Disable' : 'Enable'}
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         {users.length === 0 && <Empty>No users yet.</Empty>}
       </section>
@@ -514,7 +517,7 @@ function DigestPanel() {
   return (
     <section className="card p-4">
       <h2 className="text-sm font-semibold">Daily digest</h2>
-      <p className="mt-1 mb-3 max-w-3xl text-sm text-ink-soft">
+      <p className="mt-1 mb-3 max-w-3xl text-xs text-ink-soft">
         Posts one summary a day into a Slack or Teams channel: what was raised, handed back and verified, what is waiting
         on whom, and what is blocked. A quiet day sends nothing. Leave the URL empty to switch it off.
       </p>

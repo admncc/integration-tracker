@@ -35,7 +35,7 @@ export default function Dashboard() {
         <p className="text-sm text-ink-soft">Where every site stands, and what is blocking the ones that are not live yet.</p>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         {cards.map((card) => (
           <Link key={card.label} to={card.to} className="card p-4 transition hover:border-line-strong">
             <div className={`text-2xl font-semibold tabular-nums ${card.tone ? TONE_TEXT[card.tone] : ''}`}>{card.value}</div>
@@ -72,6 +72,15 @@ export default function Dashboard() {
               );
             })}
           </div>
+          {/* The bars are colour only; without this the blue and purple slices meant nothing. */}
+          <ul className="mt-4 flex flex-wrap gap-x-3 gap-y-1 text-xs text-ink-soft">
+            {Object.entries(TRACK_STATUS).map(([key, meta]) => (
+              <li key={key} className="flex items-center gap-1.5">
+                <span aria-hidden className={`size-2 rounded-full ${TONE_BG[meta.tone as Tone]}`} />
+                {meta.label}
+              </li>
+            ))}
+          </ul>
         </section>
 
         <section className="card p-4">
@@ -232,8 +241,34 @@ const FIELD_LABELS: Record<string, string> = {
   rpm_previous_currency: 'the previous RPM currency',
   rpm_primis_currency: 'the Primis RPM currency',
   managed_by: 'Managed by',
+  owner_id: 'the responsible',
   archived: 'the archived flag',
 };
+
+/** The same for edits to an issue. */
+const ISSUE_FIELD_LABELS: Record<string, string> = {
+  title: 'the title',
+  description: 'the description',
+  type: 'the type',
+  severity: 'the severity',
+  category: 'the category',
+  assignee_id: 'the assignee',
+  due_date: 'the due date',
+  blocked_on: 'who it is blocked on',
+  test_url: 'the test URL',
+};
+
+/** And for the settings page. */
+const SETTING_LABELS: Record<string, string> = {
+  fx_eur_usd: 'the EUR/USD rate',
+  fx_auto: 'the automatic ECB rate',
+  digest_webhook_url: 'the daily digest channel',
+  digest_hour: 'the daily digest time',
+};
+
+/** "6 potential project(s) added" -> 6, for a sentence that reads properly. */
+const countIn = (value: string | null) => Number.parseInt(value ?? '', 10) || 0;
+const domains = (n: number) => `${n} domain${n === 1 ? '' : 's'}`;
 
 const TRACK_FIELDS = new Set(['status_video', 'status_display', 'status_ads_txt', 'status_ad_tag', 'status_mcm']);
 
@@ -279,8 +314,27 @@ function ActivityLine({ entry }: { entry: ActivityEntry }) {
           {ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value}
         </>
       );
+    case 'prospects_imported':
+      return <>added {domains(countIn(entry.new_value))} to <Link to="/sites?view=potentials" className="text-ink hover:text-brand hover:underline">Potential projects</Link></>;
+    case 'prospects_deleted':
+      return <>deleted {domains(countIn(entry.new_value))} from Potential projects</>;
+    case 'setting_changed': {
+      const label = SETTING_LABELS[entry.field ?? ''] ?? 'a setting';
+      // The webhook URL is a secret of sorts; the feed says that it changed, not what to.
+      if (entry.field === 'digest_webhook_url') return <>{entry.new_value === 'test sent' ? 'sent a test digest' : `changed ${label}`}</>;
+      return <>set {label} to {entry.new_value}</>;
+    }
+    case 'issue_updated': {
+      const field = entry.field ?? '';
+      const label = ISSUE_FIELD_LABELS[field] ?? field;
+      const target = issueLink ?? 'an issue';
+      if (field === 'assignee_id') return <>assigned {target} to {entry.new_person ?? 'nobody'}</>;
+      if (field === 'description' || field === 'title') return <>edited {label} of {target}</>;
+      return <>set {label} of {target} to {entry.new_value || 'nothing'}</>;
+    }
     default: {
       const field = entry.field ?? '';
+      if (field === 'owner_id') return <>made {entry.new_person ?? 'nobody'} responsible</>;
       const label = FIELD_LABELS[field] ?? field;
       const value = TRACK_FIELDS.has(field)
         ? (TRACK_STATUS[entry.new_value as keyof typeof TRACK_STATUS]?.label ?? entry.new_value)

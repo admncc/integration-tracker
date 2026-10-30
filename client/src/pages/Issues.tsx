@@ -168,14 +168,14 @@ export default function Issues() {
             {params.get('batch_id') && ' · one batch'}
           </p>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
           <input
-            className="field w-56"
+            className="field w-56 max-sm:w-full"
             placeholder="Search title, domain..."
             value={params.get('q') ?? ''}
             onChange={(event) => setFilter('q', event.target.value)}
           />
-          <a href={exportHref} className="rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-raised">
+          <a href={exportHref} className="whitespace-nowrap rounded-lg border border-line-strong px-3 py-1.5 text-sm hover:bg-raised">
             Export CSV
           </a>
           <Button variant="primary" onClick={() => setComposing(true)} disabled={sites.length === 0}>
@@ -204,7 +204,7 @@ export default function Issues() {
           <label key={filter.key} className="text-xs">
             <span className="mb-1 block text-ink-faint">{filter.label}</span>
             <select
-              className="field !w-auto !py-1"
+              className="field !w-auto !py-1 !text-xs"
               value={params.get(filter.key) ?? ('fallback' in filter ? filter.fallback : '')}
               onChange={(event) => setFilter(filter.key, event.target.value)}
             >
@@ -216,18 +216,9 @@ export default function Issues() {
           </label>
         ))}
 
-        <label className="flex items-center gap-1.5 self-end pb-1 text-xs text-ink-soft">
-          <input
-            type="checkbox"
-            checked={params.get('archived') === '1'}
-            onChange={(event) => setFilter('archived', event.target.checked ? '1' : '')}
-          />
-          Include archived domains
-        </label>
-
         <label className="text-xs">
           <span className="mb-1 block text-ink-faint">Site</span>
-          <select className="field !w-auto !py-1" value={siteId ?? ''} onChange={(event) => setFilter('site_id', event.target.value)}>
+          <select className="field !w-auto max-w-56 !py-1 !text-xs" value={siteId ?? ''} onChange={(event) => setFilter('site_id', event.target.value)}>
             <option value="">All sites</option>
             <option value="network">Network-wide only</option>
             <option value="per_site">Domain issues only</option>
@@ -242,7 +233,7 @@ export default function Issues() {
 
         <label className="text-xs">
           <span className="mb-1 block text-ink-faint">Raised by</span>
-          <select className="field !w-auto !py-1" value={params.get('reporter_id') ?? ''} onChange={(event) => setFilter('reporter_id', event.target.value)}>
+          <select className="field !w-auto !py-1 !text-xs" value={params.get('reporter_id') ?? ''} onChange={(event) => setFilter('reporter_id', event.target.value)}>
             <option value="">Anyone</option>
             {user && <option value={user.id}>Me ({user.name})</option>}
             {allUsers
@@ -257,7 +248,7 @@ export default function Issues() {
 
         <label className="text-xs">
           <span className="mb-1 block text-ink-faint">Raised</span>
-          <select className="field !w-auto !py-1" value={params.get('since') ?? ''} onChange={(event) => setFilter('since', event.target.value)}>
+          <select className="field !w-auto !py-1 !text-xs" value={params.get('since') ?? ''} onChange={(event) => setFilter('since', event.target.value)}>
             <option value="">Any time</option>
             <option value={daysAgo(0)}>Today</option>
             <option value={daysAgo(1)}>Since yesterday</option>
@@ -268,7 +259,7 @@ export default function Issues() {
 
         <label className="text-xs">
           <span className="mb-1 block text-ink-faint">Assignee</span>
-          <select className="field !w-auto !py-1" value={params.get('assignee_id') ?? ''} onChange={(event) => setFilter('assignee_id', event.target.value)}>
+          <select className="field !w-auto !py-1 !text-xs" value={params.get('assignee_id') ?? ''} onChange={(event) => setFilter('assignee_id', event.target.value)}>
             {/* Everything the partner raises without picking someone lands here. */}
             <option value="none">Unassigned</option>
             <option value="">Anyone</option>
@@ -276,6 +267,15 @@ export default function Issues() {
               <option key={user.id} value={user.id}>{user.name}</option>
             ))}
           </select>
+        </label>
+
+        <label className="flex items-center gap-1.5 self-end pb-1 text-xs text-ink-soft">
+          <input
+            type="checkbox"
+            checked={params.get('archived') === '1'}
+            onChange={(event) => setFilter('archived', event.target.checked ? '1' : '')}
+          />
+          Include archived domains
         </label>
 
         {query && (

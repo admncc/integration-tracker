@@ -235,7 +235,7 @@ export function Button({
   return (
     <button
       {...props}
-      className={`inline-flex items-center justify-center gap-1.5 rounded-lg font-medium transition
+      className={`inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-lg font-medium transition
         disabled:cursor-not-allowed disabled:opacity-50 ${variants[variant]} ${sizes[size]} ${className}`}
     />
   );
@@ -274,7 +274,7 @@ export function Modal({ title, onClose, children, wide = false }: { title: strin
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
     <label className="block space-y-1">
-      <span className="text-xs font-medium text-ink-soft">{label}</span>
+      <span className="block text-xs font-medium text-ink-soft">{label}</span>
       {children}
       {hint && <span className="block text-xs text-ink-faint">{hint}</span>}
     </label>

@@ -92,7 +92,10 @@ export default function IssueDetail() {
             <ul className="space-y-1.5">
               {siblings.map((sibling) => (
                 <li key={sibling.id} className="flex items-center gap-2 text-sm">
-                  <Badge tone={(ISSUE_STATUS[sibling.status]?.tone ?? 'slate') as Tone}>{ISSUE_STATUS[sibling.status]?.label}</Badge>
+                  {/* A fixed slot, so the domains line up whatever the status says. */}
+                  <span className="w-32 shrink-0">
+                    <Badge tone={(ISSUE_STATUS[sibling.status]?.tone ?? 'slate') as Tone}>{ISSUE_STATUS[sibling.status]?.label}</Badge>
+                  </span>
                   <Link to={`/issues/${sibling.id}`} className="hover:text-brand hover:underline">
                     {sibling.domain}
                   </Link>

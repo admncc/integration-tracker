@@ -164,7 +164,12 @@ export default function IssueCard({
           {open ? '▾' : '▸'}
         </button>
 
-        <div className="min-w-0 flex-1">
+        {/*
+         * The minimum width is what lets the controls on the right drop to their
+         * own line on a phone. Without it this column shrank to nothing and the
+         * title came out one letter per line.
+         */}
+        <div className="min-w-[14rem] flex-1">
           <div className="flex flex-wrap items-center gap-2">
             {deleted && <Badge tone="muted">Deleted</Badge>}
             <Badge tone={status.tone}>{status.label}</Badge>
