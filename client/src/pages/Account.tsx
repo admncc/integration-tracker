@@ -1,44 +1,13 @@
-import { useState } from 'react';
-import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import { ROLES } from '@shared/domain.js';
-import { Badge, Button, Field, type Tone } from '../components/ui';
+import { Badge, type Tone } from '../components/ui';
 
 const ROLE_TONE: Record<string, Tone> = { admin: 'blue', dev: 'slate', partner: 'purple' };
 
-/**
- * Everyone needs to be able to change their own password. Settings is admin
- * only, so that one control lives here instead, reachable from your own name
- * in the header.
- */
+/** Who you are signed in as. Reachable from your own name in the header. */
 export default function Account() {
   const { user } = useSession();
-  const [form, setForm] = useState({ current: '', next: '', confirm: '' });
-  const [state, setState] = useState<{ error?: string; done?: boolean }>({});
-  const [busy, setBusy] = useState(false);
-
   if (!user) return null;
-
-  async function submit(event: React.FormEvent) {
-    event.preventDefault();
-    setState({});
-
-    if (form.next !== form.confirm) {
-      setState({ error: 'The two new passwords do not match' });
-      return;
-    }
-
-    setBusy(true);
-    try {
-      await api.post('/auth/password', { current: form.current, next: form.next });
-      setState({ done: true });
-      setForm({ current: '', next: '', confirm: '' });
-    } catch (err) {
-      setState({ error: err instanceof Error ? err.message : 'Could not change the password' });
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div className="mx-auto max-w-xl space-y-5">
@@ -73,53 +42,19 @@ export default function Account() {
           </div>
         </dl>
         <p className="mt-3 border-t border-line pt-3 text-xs text-ink-faint">
-          Name, username and role are managed by an admin. Ask them if something here is wrong.
+          Name, e-mail and role are managed by an admin. Ask them if something here is wrong.
         </p>
       </section>
 
       <section className="card p-4">
-        <h2 className="mb-3 text-sm font-semibold">Change your password</h2>
-        <form onSubmit={submit} className="space-y-3">
-          <Field label="Current password">
-            <input
-              className="field"
-              type="password"
-              autoComplete="current-password"
-              required
-              value={form.current}
-              onChange={(e) => setForm({ ...form, current: e.target.value })}
-            />
-          </Field>
-          <Field label="New password" hint="At least 8 characters.">
-            <input
-              className="field"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={8}
-              value={form.next}
-              onChange={(e) => setForm({ ...form, next: e.target.value })}
-            />
-          </Field>
-          <Field label="Repeat the new password">
-            <input
-              className="field"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={8}
-              value={form.confirm}
-              onChange={(e) => setForm({ ...form, confirm: e.target.value })}
-            />
-          </Field>
-
-          {state.error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{state.error}</p>}
-          {state.done && <p className="rounded-lg bg-tone-green-bg px-3 py-2 text-sm text-tone-green">Password changed.</p>}
-
-          <Button type="submit" variant="primary" disabled={busy}>
-            {busy ? 'Changing...' : 'Change password'}
-          </Button>
-        </form>
+        <h2 className="mb-2 text-sm font-semibold">Signing in</h2>
+        <p className="text-sm text-ink-soft">
+          There is no password. On the sign-in page you enter your e-mail address and get a link and a code, valid for one
+          hour. A sign-in lasts seven days on that device, then you ask for a new e-mail.
+        </p>
+        <p className="mt-2 text-xs text-ink-faint">
+          If your address changes, ask an admin to update it here - it is the only way into your account.
+        </p>
       </section>
     </div>
   );

@@ -10,7 +10,8 @@ interface SessionValue {
   /** Instance-wide settings; today just the EUR/USD rate used for RPM comparisons. */
   eurUsd: number;
   setEurUsd: (rate: number) => void;
-  signIn: (identifier: string, password: string) => Promise<void>;
+  /** Redeems a sign-in e-mail: its code (with the address) or its link token. */
+  signIn: (proof: { email: string; code: string } | { token: string }) => Promise<void>;
   /** Set when a request came back 401 mid-visit, so the form can explain itself. */
   expired: boolean;
   signOut: () => Promise<void>;
@@ -69,12 +70,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       .catch(() => setEurUsd(DEFAULT_EUR_USD));
   }, [user, location.pathname]);
 
-  const signIn = useCallback(async (identifier: string, password: string) => {
+  const signIn = useCallback(async (proof: { email: string; code: string } | { token: string }) => {
     setExpired(false);
-    await api.post<{ user: User }>('/auth/login', { identifier, password });
+    await api.post<{ user: User }>('token' in proof ? '/auth/login/link' : '/auth/login/code', proof);
 
     /*
-     * The credentials were right, but that only means the server issued a cookie -
+     * The code was right, but that only means the server issued a cookie -
      * the browser may still have refused to keep it. Confirm the session actually
      * exists before showing the app, otherwise every page loads empty with no
      * explanation of why.

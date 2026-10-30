@@ -16,13 +16,17 @@ if (process.argv.includes('--reset')) {
 }
 
 const { db, logActivity } = await import('../server/lib/db.js');
-const { hashPassword } = await import('../server/lib/auth.js');
 const { parseStatus, parseCmp, parseApproval, normaliseDomain } = await import('../server/lib/sheet.js');
 
-const DEFAULT_PASSWORD = process.env.SEED_PASSWORD ?? 'changeme123';
+/*
+ * Sign-in is by e-mail, so the admin account needs a real address. ADMIN_EMAIL
+ * in .env gives it one on a fresh install; otherwise set it afterwards with
+ * `npm run users -- set-email admin you@example.com`.
+ */
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL ?? '').trim().toLowerCase();
 
 const USERS = [
-  { username: 'admin',      email: 'admin@publisher.test', name: 'Khoi Pham',    role: 'admin',   company: 'Publisher' },
+  { username: 'admin',      email: ADMIN_EMAIL || 'admin@publisher.test', name: 'Khoi Pham',    role: 'admin',   company: 'Publisher' },
   { username: 'dev',        email: 'dev@publisher.test',   name: 'Dev Team',     role: 'dev',     company: 'Publisher' },
   { username: 'dev-extern', email: 'dev2@publisher.test',  name: 'External Dev', role: 'dev',     company: 'Publisher' },
   { username: 'primis-qa',  email: 'qa@primis.test',       name: 'Primis QA',    role: 'partner', company: 'Primis' },
@@ -31,12 +35,12 @@ const USERS = [
 /*
  * Real people are not seeded, and neither is who is responsible for what.
  *
- * The four above are starting points for an empty install, with a published
- * default password. An account for somebody who actually exists belongs in
- * Settings, made by an admin, with a password only they know - and handing the
- * domains to them is `npm run assign-owner`, which works on the account that is
- * already there instead of inventing a second one under a username of its own
- * choosing.
+ * The four above are starting points for an empty install, on placeholder
+ * addresses nobody can receive mail at. An account for somebody who actually
+ * exists belongs in Settings or `npm run users -- add`, under their real
+ * e-mail - and handing the domains to them is `npm run assign-owner`, which
+ * works on the account that is already there instead of inventing a second one
+ * under a username of its own choosing.
  */
 
 // PRIO | domain | video | display | test URL | ads.txt | ad tag | MCM | CMP | approval
@@ -117,8 +121,8 @@ for (const user of USERS) {
     ? existing.id
     : Number(
         db
-          .prepare('INSERT INTO users (username, email, name, password_hash, role, company) VALUES (?, ?, ?, ?, ?, ?)')
-          .run(user.username, user.email, user.name, hashPassword(DEFAULT_PASSWORD), user.role, user.company).lastInsertRowid
+          .prepare("INSERT INTO users (username, email, name, password_hash, role, company) VALUES (?, ?, ?, '', ?, ?)")
+          .run(user.username, user.email, user.name, user.role, user.company).lastInsertRowid
       );
 }
 
@@ -488,8 +492,8 @@ console.log(`Database now holds ${counts.sites} sites, ${counts.issues} issues, 
  */
 db.exec('UPDATE users SET inbox_seen_message_id = (SELECT COALESCE(MAX(id), 0) FROM site_messages)');
 
-console.log(`\nSign in with any of these (password: ${DEFAULT_PASSWORD}):`);
-for (const u of USERS) console.log(`  ${u.role.padEnd(8)} ${u.username.padEnd(12)} (${u.name})`);
+console.log('\nAccounts (sign-in is by e-mail):');
+for (const u of USERS) console.log(`  ${u.role.padEnd(8)} ${u.username.padEnd(12)} ${u.email.padEnd(26)} (${u.name})`);
 const unowned = db.prepare('SELECT COUNT(*) AS n FROM sites WHERE archived = 0 AND priority < 99 AND owner_id IS NULL').get().n;
 if (unowned) {
   console.log(`\n${unowned} active domain(s) have nobody responsible for them yet.`);
@@ -497,4 +501,7 @@ if (unowned) {
   console.log('  npm run assign-owner -- <username>    hand them over');
 }
 
-console.log('\nChange these passwords before putting the tracker in front of the partner.');
+if (!ADMIN_EMAIL) {
+  console.log('\nThe admin account is on a placeholder address. Give it yours before anything else:');
+  console.log('  npm run users -- set-email admin you@example.com');
+}

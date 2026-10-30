@@ -8,6 +8,8 @@ export interface User {
   role: Role;
   company: string;
   active?: number;
+  /** Admins only. */
+  last_login_at?: string | null;
 }
 
 export type TrackStatus = 'live' | 'qa' | 'tag_impl' | 'tag_prep' | 'pending' | 'na';

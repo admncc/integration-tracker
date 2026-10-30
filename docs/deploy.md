@@ -49,8 +49,22 @@ Set at least:
 PORT=4000
 HOST=127.0.0.1
 TRUST_PROXY=1
-SEED_PASSWORD=<a long password you choose>
+PUBLIC_URL=https://tracker.example.com
+ADMIN_EMAIL=<your own e-mail address>
+
+# Outgoing mail - see "E-mail" below
+SMTP_HOST=127.0.0.1
+SMTP_PORT=25
+MAIL_FROM="Integration Tracker <noreply@example.com>"
 ```
+
+There are no passwords. Everybody signs in by typing their e-mail address and
+following the link, or typing the code, from the message that arrives - so the
+server has to be able to send e-mail before anybody can get in.
+`PUBLIC_URL` is where the link in that message points; it is never taken from
+the request, because a forged Host header would otherwise let someone have a
+real sign-in link mailed out pointing at their own server. `ADMIN_EMAIL` gives
+the seeded admin account your address.
 
 `TRUST_PROXY=1` matters: without it the app sees nginx as the client, so
 sign-in throttling counts everyone as one address.
@@ -144,16 +158,64 @@ The data stays where it is; only the way in changes.
 5. Settings -> Daily digest -> Tracker address: `https://<domain>`, so the
    links in the Slack/Teams message lead to the new address.
 
+### E-mail
+
+Sign-in e-mails go out over SMTP. Either a Postfix on this server, which the
+included script sets up, or any provider's relay (`SMTP_HOST`, `SMTP_PORT`,
+`SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE=1` for port 465).
+
+On this server:
+
+```bash
+cd /opt/integration-tracker
+sudo bash deploy/setup-mail.sh example.com
+```
+
+It installs Postfix listening on 127.0.0.1 only (nothing is received, nothing is
+reachable from outside), signs every message with DKIM, checks whether outgoing
+port 25 is open, and prints what is left to do by hand:
+
+- three TXT records - SPF, DKIM, DMARC - for the domain;
+- the server's reverse DNS (PTR) set to `mail.example.com` at the hosting
+  provider, and an A record for that name;
+- the `.env` lines above.
+
+Mail from a server without those lands in spam or is refused. An MX record is
+not needed for sending.
+
+Hetzner blocks outgoing port 25 on new cloud servers; the script says so if it
+is. Ask Hetzner to lift it, or use a relay on port 587 instead.
+
+Then `sudo systemctl restart integration-tracker` and, once signed in,
+Settings → Sign-in e-mails → "Send a test e-mail".
+
 ## 7. First sign-in
 
-Open `https://tracker.example.com`, sign in as `admin` with the password from
-`SEED_PASSWORD`, then:
+Open `https://tracker.example.com`, enter the address from `ADMIN_EMAIL` and
+sign in from the e-mail. If no e-mail arrives, get in without one and look at
+the mail setup from inside:
 
-1. Settings → change your own password.
-2. Settings → create an account for each developer and for the Primis contacts.
-3. Settings → disable the seeded `dev`, `dev-extern` and `primis-qa` accounts, or
-   set fresh passwords on them. All four were created with the same
-   `SEED_PASSWORD`, so leaving one untouched leaves a known password on the box.
+```bash
+cd /opt/integration-tracker
+sudo -u tracker -H npm run users -- login-link admin
+```
+
+That prints a link and a code, valid once for an hour. It needs nothing but the
+server, so it is also the way back in whenever mail is down. Then:
+
+1. Settings → Sign-in e-mails → send yourself a test e-mail.
+2. Create the accounts - in Settings, one at a time, or several at once:
+
+   ```bash
+   sudo -u tracker -H npm run users -- add --role partner --company Primis \
+     "Omer Peleg <omerp@example.com>" "Gabriel Neumann <gabrieln@example.com>"
+   ```
+
+   An account that already exists under that address, username or name is
+   completed instead of created twice; `--dry-run` only reports.
+3. Settings → disable the seeded `dev`, `dev-extern` and `primis-qa` accounts.
+   They sit on placeholder `.test` addresses, so nobody can sign in with them,
+   but there is no reason to keep them.
 4. Settings → check the EUR/USD rate says "European Central Bank" - that
    confirms the server can reach the outside world.
 5. Settings → make somebody responsible for the domains. Create the accounts
@@ -175,16 +237,15 @@ Open `https://tracker.example.com`, sign in as `admin` with the password from
    e-mail. Outbound HTTPS to the webhook host has to be open.
 
 `npm run seed` never creates an account for a real person and never decides who
-is responsible for what: the four accounts it makes share a published default
-password, which is fine for an empty install and wrong for anybody real.
+is responsible for what.
 
 Only then send the link to the partner.
 
 ## 8. Backups
 
 Everything lives under `data/`. The included script keeps 30 daily copies of the
-database, the attachments and `.env` (which holds the seed password and the
-proxy settings and exists nowhere else):
+database, the attachments and `.env` (which holds the mail and proxy settings
+and exists nowhere else):
 
 ```bash
 sudo mkdir -p /var/backups/integration-tracker
@@ -258,9 +319,25 @@ sudo chown -R tracker:tracker /opt/integration-tracker
 ```
 
 Schema changes apply themselves on start-up, and they only ever add - no
-migration drops a column or a row. `npm run seed` is additive too, so re-running
-it after an update picks up newly listed domains and leaves everything you have
-edited alone.
+migration drops a column or a row. (One clears values: the update to e-mail
+sign-in empties the stored password hashes, since nothing reads them any more.)
+`npm run seed` is additive too, so re-running it after an update picks up newly
+listed domains and leaves everything you have edited alone.
+
+### The update that brings e-mail sign-in
+
+From this version on there are no passwords; the old ones stop working the
+moment the new version starts. Before restarting into it:
+
+1. Set up mail and add the `.env` lines (see "E-mail" in section 6), including
+   `PUBLIC_URL`.
+2. Give your own account your real address - the seed gave it a placeholder:
+   `sudo -u tracker -H npm run users -- set-email admin you@example.com`
+3. `sudo -u tracker -H npm run users -- list` shows every account; anyone
+   flagged "no real address" cannot sign in until their address is set.
+
+Everybody who was signed in stays signed in until their session runs out; new
+sessions last seven days.
 
 **Take the backup before the update, not after**, and check it printed its
 counts. If the service does not come back:
@@ -301,6 +378,11 @@ the database is on the new schema. Restore the backup as well.
 | A domain has vanished from the list | It was archived. Open it directly at `/sites/<id>`, or tick "Show archived" on the Sites page, and use "Bring it back" |
 | The dashboard and the issue list show different counts | They should not any more; both exclude archived domains. Tick "Include archived domains" on the Issues page to see the rest |
 | Sign-in says "too many attempts" for everyone | `TRUST_PROXY=1` missing from `.env` |
+| "Sign-in by e-mail is not set up on this server yet" | `SMTP_HOST` or `MAIL_FROM` missing from `.env`, or the service was not restarted after adding them |
+| The sign-in e-mail never arrives | Settings → Sign-in e-mails → test e-mail, then `sudo journalctl -u postfix -n 50`. "Connection timed out" to port 25: the hoster blocks it. "550 ... SPF/DKIM": the DNS records or the PTR are missing. Also check the person's spam folder, and that their address in Settings is spelt right |
+| Locked out, mail is down | `sudo -u tracker -H npm run users -- login-link <you>` prints a one-time link and code |
+| The link in the e-mail points to the wrong place | `PUBLIC_URL` in `.env` |
+| The link says "expired or was already used" on first click | The company mail filter opened it first - that is why the page asks for a click instead of signing in on opening. If it still happens, type the code |
 | `fatal: detected dubious ownership` on `git pull` | You are root in a directory owned by `tracker`. Use `sudo -u tracker -H git pull`. Do not add a `safe.directory` exception: running git as root here leaves root-owned files behind, and the service cannot write them |
 | `npm error Missing script` right after an update | The `git pull` before it failed, so the new code never arrived. With `a && b` a failed `a` stops `b` - scroll up and read the first error, not the last |
 | `EACCES` from `npm ci` | Something was run as root earlier. `sudo chown -R tracker:tracker /opt/integration-tracker` |

@@ -120,6 +120,22 @@ where it does not - visible to the partner as well as to you.
 domain; the sheet's own wording ("1 - LIVE", "4 - Tags prep", "€3.13", "$2.00")
 is understood. Sites and issues both export back to CSV.
 
+## Signing in
+
+There are no passwords. On the sign-in page you enter your e-mail address and
+get a message with a link and a six-digit code. Either works once, within an
+hour; signing in spends both. A sign-in lasts seven days on that device.
+
+- The link opens the sign-in page and signs in on a click, not on opening: mail
+  filters open every link in a message before the recipient does.
+- The code is for signing in on a different device than the one reading mail.
+- The page says the same whether or not the address has an account. Five wrong
+  codes spend that person's open codes; one address gets at most five e-mails
+  an hour; one connection is slowed down after repeated failures.
+- An admin creates accounts with a name and an address (Settings, or
+  `npm run users -- add`). Changing someone's address signs them out
+  everywhere.
+
 ## Roles
 
 | Role | Can |
@@ -189,9 +205,10 @@ npm run dev         # API on :4000, UI on :5173
 
 `npm run seed` only ever adds rows, so it is safe to re-run after an update.
 
-Sign in with `admin` / `changeme123`. The seed also creates `dev`, `dev-extern`
-and `primis-qa` with the same password - **change them before the partner gets a
-link.**
+Sign in by e-mail: enter `admin@publisher.test` (or the `ADMIN_EMAIL` you set
+before seeding). Without `SMTP_HOST` in development the message is printed in
+the API's console instead of being sent - copy the code or the link from there.
+`npm run users -- login-link admin` prints a link without any e-mail at all.
 
 For production:
 
@@ -216,7 +233,12 @@ nginx, a certificate and backups. Ready-made unit and nginx files are in
 | `TRUST_PROXY` | unset | set to `1` behind a reverse proxy |
 | `DISABLE_FX_REFRESH` | unset | set to `1` to never call the ECB |
 | `INSECURE_COOKIES` | unset | set to `1` only to run production over plain HTTP |
-| `SEED_PASSWORD` | `changeme123` | password the seed gives its accounts |
+| `HOST` | every interface | `127.0.0.1` behind nginx |
+| `PUBLIC_URL` | unset | the tracker's address, for the link in sign-in e-mails |
+| `SMTP_HOST`, `SMTP_PORT` | unset, `25` | where e-mail is handed over; `deploy/setup-mail.sh` sets up a local Postfix |
+| `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE` | unset | for a relay that wants a login; `SMTP_SECURE=1` for TLS from the start |
+| `MAIL_FROM` | unset | sender of the sign-in e-mails |
+| `ADMIN_EMAIL` | placeholder | the seeded admin account's address |
 
 Everything worth keeping lives under `data/` - back up that directory and you
 have the whole tracker.
@@ -226,7 +248,9 @@ have the whole tracker.
 ```
 server/          Express API, plain ESM, no build step
   lib/db.js      schema, migrations, activity log
-  lib/auth.js    scrypt passwords, cookie sessions, role guards
+  lib/auth.js    cookie sessions (7 days), role guards
+  lib/login.js   sign-in e-mails: link and code, hashed, one hour, one use
+  lib/mail.js    SMTP via nodemailer
   lib/sheet.js   CSV parsing and the Google Sheet vocabulary
   lib/fx.js      ECB daily reference rate
   lib/uploads.js attachment storage

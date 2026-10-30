@@ -20,7 +20,7 @@ export default function Settings() {
   const { user } = useSession();
   const [users, setUsers] = useState<User[]>([]);
   const [creating, setCreating] = useState(false);
-  const [resetting, setResetting] = useState<User | null>(null);
+  const [editing, setEditing] = useState<User | null>(null);
   const [notice, setNotice] = useState('');
   /** What the dropdown shows while a change is pending or has been declined. */
   const [roleDraft, setRoleDraft] = useState<Record<number, User['role']>>({});
@@ -82,15 +82,16 @@ export default function Settings() {
           </Button>
         </header>
 
-        {/* Six columns do not fit a phone; the table scrolls inside its card instead of the page. */}
+        {/* Seven columns do not fit a phone; the table scrolls inside its card instead of the page. */}
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[720px] text-sm">
+          <table className="w-full min-w-[860px] text-sm">
             <thead>
               <tr className="border-b border-line text-left text-xs text-ink-soft">
                 <th className="px-4 py-2 font-medium">Name</th>
-                <th className="px-4 py-2 font-medium">Username</th>
+                <th className="px-4 py-2 font-medium">E-mail</th>
                 <th className="px-4 py-2 font-medium">Company</th>
                 <th className="px-4 py-2 font-medium">Role</th>
+                <th className="px-4 py-2 font-medium">Last sign-in</th>
                 <th className="px-4 py-2 font-medium">Status</th>
                 <th className="px-4 py-2" />
               </tr>
@@ -102,7 +103,14 @@ export default function Settings() {
                     {row.name}
                     {row.id === user?.id && <span className="ml-2 text-xs text-ink-faint">you</span>}
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs">{row.username}</td>
+                  <td className="px-4 py-2 text-ink-soft">
+                    {/* The address is the only way in now; one nobody can receive mail at is worth flagging. */}
+                    {row.email && !/\.test$/i.test(row.email) ? (
+                      <span className="[overflow-wrap:anywhere]">{row.email}</span>
+                    ) : (
+                      <Badge tone="amber">{row.email ? `${row.email} - placeholder` : 'No e-mail'} · cannot sign in</Badge>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-ink-soft">{row.company || '-'}</td>
                   <td className="px-4 py-2">
                     <select
@@ -119,11 +127,14 @@ export default function Settings() {
                       ))}
                     </select>
                   </td>
+                  <td className="px-4 py-2 text-xs text-ink-soft whitespace-nowrap">
+                    {row.last_login_at ? formatDateTime(row.last_login_at) : <span className="text-ink-faint">Never</span>}
+                  </td>
                   <td className="px-4 py-2">
                     <Badge tone={row.active ? 'green' : 'muted'}>{row.active ? 'Active' : 'Disabled'}</Badge>
                   </td>
                   <td className="px-4 py-2 text-right whitespace-nowrap">
-                      <Button size="sm" onClick={() => setResetting(row)}>Set password</Button>{' '}
+                    <Button size="sm" onClick={() => setEditing(row)}>Edit</Button>{' '}
                     <Button size="sm" variant={row.active ? 'danger' : 'secondary'} onClick={() => toggleActive(row)}>
                       {row.active ? 'Disable' : 'Enable'}
                     </Button>
@@ -141,6 +152,8 @@ export default function Settings() {
         <ExchangeRatePanel />
         <ImportPanel />
       </div>
+
+      <MailPanel />
 
       <DigestPanel />
 
@@ -166,13 +179,22 @@ export default function Settings() {
         />
       )}
 
-      {resetting && <ResetPasswordModal target={resetting} onClose={() => setResetting(null)} />}
+      {editing && (
+        <EditUserModal
+          target={editing}
+          onClose={() => setEditing(null)}
+          onSaved={(saved) => {
+            setUsers((current) => current.map((u) => (u.id === saved.id ? saved : u)));
+            setEditing(null);
+          }}
+        />
+      )}
     </div>
   );
 }
 
 function NewUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: (user: User) => void }) {
-  const [form, setForm] = useState({ username: '', name: '', email: '', password: '', role: 'dev' as User['role'], company: '' });
+  const [form, setForm] = useState({ name: '', email: '', role: 'partner' as User['role'], company: '' });
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -193,26 +215,12 @@ function NewUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   return (
     <Modal title="New user" onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Username" hint="Lower case, used to sign in.">
-            <input
-              className="field"
-              required
-              minLength={2}
-              pattern="[a-zA-Z0-9._\-]+"
-              value={form.username}
-              onChange={(e) => setForm({ ...form, username: e.target.value.toLowerCase() })}
-            />
-          </Field>
-          <Field label="Full name">
-            <input className="field" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
-          </Field>
-        </div>
-
-        <Field label="Password" hint="At least 8 characters. Share it with the person directly.">
-          <input className="field" type="text" required minLength={8} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} />
+        <Field label="Full name">
+          <input className="field" required autoFocus value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </Field>
-
+        <Field label="E-mail" hint="What they sign in with: they enter it on the sign-in page and get a link and a code.">
+          <input className="field" type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        </Field>
         <div className="grid grid-cols-2 gap-3">
           <Field label="Role">
             <select className="field" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value as User['role'] })}>
@@ -226,10 +234,6 @@ function NewUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           </Field>
         </div>
 
-        <Field label="E-mail (optional)" hint="Only for reference - sign-in works with the username.">
-          <input className="field" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
-        </Field>
-
         <p className="rounded-lg bg-raised px-3 py-2 text-xs text-ink-soft">{ROLES[form.role].hint}</p>
         {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{error}</p>}
 
@@ -242,34 +246,123 @@ function NewUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
   );
 }
 
-function ResetPasswordModal({ target, onClose }: { target: User; onClose: () => void }) {
-  const [password, setPassword] = useState('');
-  const [state, setState] = useState<{ error?: string; done?: boolean }>({});
+/** Name, address and company. Role and enabling have their own controls in the row. */
+function EditUserModal({ target, onClose, onSaved }: { target: User; onClose: () => void; onSaved: (user: User) => void }) {
+  const [form, setForm] = useState({ name: target.name, email: target.email ?? '', company: target.company });
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const addressChanged = form.email.trim().toLowerCase() !== String(target.email ?? '').toLowerCase();
 
   async function submit(event: React.FormEvent) {
     event.preventDefault();
+    setBusy(true);
+    setError('');
     try {
-      await api.patch(`/users/${target.id}`, { password });
-      setState({ done: true });
+      const { user } = await api.patch<{ user: User }>(`/users/${target.id}`, form);
+      onSaved(user);
     } catch (err) {
-      setState({ error: err instanceof Error ? err.message : 'Could not set the password' });
+      setError(err instanceof Error ? err.message : 'Could not save');
+    } finally {
+      setBusy(false);
     }
   }
 
   return (
-    <Modal title={`Set a password for ${target.name}`} onClose={onClose}>
+    <Modal title={`Edit ${target.name}`} onClose={onClose}>
       <form onSubmit={submit} className="space-y-3">
-        <Field label="New password" hint="At least 8 characters.">
-          <input className="field" type="text" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} />
+        <Field label="Full name">
+          <input className="field" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
         </Field>
-        {state.error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{state.error}</p>}
-        {state.done && <p className="rounded-lg bg-tone-green-bg px-3 py-2 text-sm text-tone-green">Password updated.</p>}
+        <Field label="E-mail" hint="What they sign in with.">
+          <input className="field" type="email" required value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} />
+        </Field>
+        <Field label="Company">
+          <input className="field" value={form.company} onChange={(e) => setForm({ ...form, company: e.target.value })} />
+        </Field>
+        {addressChanged && (
+          <p className="rounded-lg bg-tone-amber-bg px-3 py-2 text-xs text-tone-amber">
+            A new address signs {target.name} out everywhere; they sign in again with the new one.
+          </p>
+        )}
+        {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{error}</p>}
         <div className="flex justify-end gap-2">
-          <Button type="button" onClick={onClose}>Close</Button>
-          <Button type="submit" variant="primary">Set password</Button>
+          <Button type="button" onClick={onClose}>Cancel</Button>
+          <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Saving...' : 'Save'}</Button>
         </div>
       </form>
     </Modal>
+  );
+}
+
+interface MailStatus {
+  configured: boolean;
+  host: string;
+  port: number;
+  from: string;
+  public_url: string;
+}
+
+/**
+ * Sign-in depends on e-mail arriving, so whether it does is worth a button.
+ * The setup itself lives in .env on the server (docs/deploy.md).
+ */
+function MailPanel() {
+  const { user } = useSession();
+  const [status, setStatus] = useState<MailStatus | null>(null);
+  const [state, setState] = useState<{ error?: string; done?: string }>({});
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get<MailStatus>('/settings/mail').then(setStatus).catch(() => setStatus(null));
+  }, []);
+
+  async function test() {
+    setBusy(true);
+    setState({});
+    try {
+      const sent = await api.post<{ to: string }>('/settings/mail/test');
+      setState({ done: `Sent to ${sent.to}. If it does not arrive within a minute, look in spam, then at the server log.` });
+    } catch (err) {
+      setState({ error: err instanceof Error ? err.message : 'Sending failed' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card p-4">
+      <h2 className="text-sm font-semibold">Sign-in e-mails</h2>
+      <p className="mt-1 mb-3 max-w-3xl text-xs text-ink-soft">
+        Everybody signs in with a link and a code sent to their address. The mail server is set in <code>.env</code> on the
+        server - see docs/deploy.md.
+      </p>
+      {status && (
+        <dl className="mb-3 grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[10rem_1fr]">
+          <dt className="text-ink-faint">Sending</dt>
+          <dd>
+            {status.configured ? (
+              <Badge tone="green">Set up</Badge>
+            ) : (
+              <Badge tone="red">Not set up - nobody can sign in</Badge>
+            )}{' '}
+            {status.configured && (
+              <span className="text-ink-soft">
+                via {status.host}:{status.port} as {status.from}
+              </span>
+            )}
+          </dd>
+          <dt className="text-ink-faint">Links point to</dt>
+          <dd className="[overflow-wrap:anywhere]">
+            {status.public_url || <span className="text-tone-amber">nowhere yet - set PUBLIC_URL; until then the e-mail carries only the code</span>}
+          </dd>
+        </dl>
+      )}
+      <Button onClick={test} disabled={busy || !status?.configured}>
+        {busy ? 'Sending...' : `Send a test e-mail to ${user?.email ?? 'me'}`}
+      </Button>
+      {state.done && <p className="mt-3 rounded-lg bg-tone-green-bg px-3 py-2 text-sm text-tone-green">{state.done}</p>}
+      {state.error && <p className="mt-3 rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{state.error}</p>}
+    </section>
   );
 }
 

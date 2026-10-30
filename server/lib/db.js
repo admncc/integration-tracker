@@ -44,6 +44,21 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
 
+-- Sign-in by e-mail: one row per e-mail sent, holding hashes of the link token
+-- and of the code, never the values themselves. See server/lib/login.js.
+CREATE TABLE IF NOT EXISTS login_tokens (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  code_hash  TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  attempts   INTEGER NOT NULL DEFAULT 0,
+  used_at    TEXT,
+  ip         TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_login_tokens_user ON login_tokens(user_id);
+
 CREATE TABLE IF NOT EXISTS sites (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   domain            TEXT NOT NULL UNIQUE,
@@ -202,6 +217,8 @@ const LATE_COLUMNS = [
   ['prospects', 'project_status', "TEXT NOT NULL DEFAULT 'new'"],
   ['prospects', 'domain_status', "TEXT NOT NULL DEFAULT 'new'"],
   ['prospects', 'high_potential', 'INTEGER NOT NULL DEFAULT 0'],
+  // When the person last signed in, for the people list in Settings.
+  ['users', 'last_login_at', 'TEXT'],
 ];
 
 for (const [table, column, definition] of LATE_COLUMNS) {
@@ -381,6 +398,28 @@ db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_domain ON prospects(domain_sta
  * currency was a real choice.
  */
 db.prepare("UPDATE sites SET rpm_primis_currency = 'EUR' WHERE rpm_primis IS NULL AND rpm_primis_currency = 'USD'").run();
+
+/*
+ * Sign-in is by e-mail only. The stored password hashes can no longer open
+ * anything, so they are not kept around to be lifted out of a backup. The
+ * column stays (NOT NULL in existing databases) and holds ''.
+ */
+if (!getSetting('passwords_retired')) {
+  db.exec("UPDATE users SET password_hash = ''");
+  setSetting('passwords_retired', '1');
+}
+
+/*
+ * The e-mail address is now what a person signs in with, so two accounts on
+ * one address would make it a coin toss who gets in. The API refuses
+ * duplicates; this makes the database refuse them too. A database that already
+ * has a duplicate boots anyway and says so, rather than taking the tracker down.
+ */
+try {
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(lower(email)) WHERE email IS NOT NULL AND email != ''");
+} catch (err) {
+  console.warn(`Two accounts share an e-mail address - fix that in Settings: ${err.message}`);
+}
 
 /*
  * Nobody should meet the whole discussion history as unread on the day this

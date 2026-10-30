@@ -1,7 +1,9 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { db, getSetting, logActivity, setSetting } from '../lib/db.js';
-import { hashPassword, requireAuth, requireRole } from '../lib/auth.js';
+import { requireAuth, requireRole, usernameFor } from '../lib/auth.js';
+import { mailConfig, mailConfigured, sendMail } from '../lib/mail.js';
+import { publicUrl } from '../lib/login.js';
 import { APPROVAL, CMP, DEFAULT_EUR_USD, FX_SETTING_KEY, OPEN_ISSUE_STATUSES, TRACKS, TRACK_STATUS } from '../../shared/domain.js';
 import { FX_KEYS, fxState, refreshRate } from '../lib/fx.js';
 import { DIGEST_KEYS, buildDigest, digestPayload, digestState, isQuiet, sendDigest } from '../lib/digest.js';
@@ -307,30 +309,33 @@ metaRouter.get('/settings/digest/preview', requireRole('admin'), (_req, res) => 
 
 metaRouter.get('/users', (req, res) => {
   // Everyone needs the roster to assign work; only an admin needs the addresses.
-  const columns = req.user.role === 'admin' ? 'id, username, email, name, role, company, active' : 'id, username, name, role, company, active';
+  const columns =
+    req.user.role === 'admin'
+      ? 'id, username, email, name, role, company, active, last_login_at'
+      : 'id, username, name, role, company, active';
   res.json({ users: db.prepare(`SELECT ${columns} FROM users ORDER BY role, name`).all() });
 });
+
+const USER_COLUMNS = 'id, username, email, name, role, company, active, last_login_at';
+
+const emailField = z.string().trim().toLowerCase().email('Enter a valid e-mail address - it is what the person signs in with');
 
 metaRouter.post('/users', requireRole('admin'), (req, res) => {
   const parsed = z
     .object({
-      username: z.string().trim().toLowerCase().min(2).max(60).regex(/^[a-z0-9._-]+$/, 'letters, digits, dot, dash and underscore only'),
-      email: z.string().trim().toLowerCase().email().or(z.literal('')).default(''),
-      name: z.string().trim().min(1).max(190),
-      password: z.string().min(8),
+      email: emailField,
+      name: z.string().trim().min(1, 'Enter a name').max(190),
       role: z.enum(['admin', 'dev', 'partner']),
       company: z.string().trim().max(190).default(''),
     })
+    .strict()
     .safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid user data', details: parsed.error.flatten() });
   }
 
-  const { username, email, name, password, role, company } = parsed.data;
-  if (db.prepare('SELECT id FROM users WHERE username = ?').get(username)) {
-    return res.status(409).json({ error: `The username "${username}" is taken` });
-  }
-  if (email && db.prepare('SELECT id FROM users WHERE lower(email) = ?').get(email)) {
+  const { email, name, role, company } = parsed.data;
+  if (db.prepare('SELECT id FROM users WHERE lower(email) = ?').get(email)) {
     return res.status(409).json({ error: 'That e-mail is already registered' });
   }
   const id = Number(
@@ -338,15 +343,15 @@ metaRouter.post('/users', requireRole('admin'), (req, res) => {
       /*
        * A new colleague starts level with the discussion as it stands. Without
        * the baseline their first sign-in would announce every message ever
-       * written as unread.
+       * written as unread. No password: sign-in is by e-mail.
        */
       .prepare(
         `INSERT INTO users (username, email, name, password_hash, role, company, inbox_seen_message_id)
-         VALUES (?, ?, ?, ?, ?, ?, (SELECT COALESCE(MAX(id), 0) FROM site_messages))`
+         VALUES (?, ?, ?, '', ?, ?, (SELECT COALESCE(MAX(id), 0) FROM site_messages))`
       )
-      .run(username, email || null, name, hashPassword(password), role, company).lastInsertRowid
+      .run(usernameFor(email), email, name, role, company).lastInsertRowid
   );
-  res.status(201).json({ user: { id, username, email, name, role, company, active: 1 } });
+  res.status(201).json({ user: db.prepare(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`).get(id) });
 });
 
 metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
@@ -357,12 +362,12 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
   const parsed = z
     .object({
       name: z.string().trim().min(1).max(190),
+      email: emailField,
       role: z.enum(['admin', 'dev', 'partner']),
       company: z.string().trim().max(190),
       // Strict, not coerced: "false" and "off" are truthy strings, so the very
       // call meant to disable a compromised account used to enable it.
       active: z.boolean({ invalid_type_error: 'active must be true or false' }),
-      password: z.string().min(8, 'A password must be at least 8 characters'),
     })
     .partial()
     .strict()
@@ -371,7 +376,7 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
     return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Invalid user data' });
   }
 
-  const { password, ...fields } = parsed.data;
+  const fields = { ...parsed.data };
 
   /*
    * One unconfirmed click on your own row used to lock you out for good,
@@ -384,7 +389,11 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
     }
   }
 
-  if (password) fields.password_hash = hashPassword(password);
+  if (fields.email && fields.email !== String(user.email ?? '').toLowerCase()) {
+    if (db.prepare('SELECT id FROM users WHERE lower(email) = ? AND id != ?').get(fields.email, id)) {
+      return res.status(409).json({ error: 'That e-mail is already registered' });
+    }
+  }
   if (fields.active !== undefined) fields.active = fields.active ? 1 : 0;
 
   // Locking yourself out of the only admin account is not recoverable from the UI.
@@ -397,11 +406,40 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
   if (entries.length) {
     db.prepare(`UPDATE users SET ${entries.map(([f]) => `${f} = ?`).join(', ')} WHERE id = ?`).run(...entries.map(([, v]) => v), id);
   }
-  // A new password or a disabled account must not leave old sessions alive.
-  if (password || fields.active === 0) {
+  /*
+   * A disabled account must not leave sessions alive, and neither must a
+   * changed address: the old inbox might be the reason it was changed. Open
+   * sign-in e-mails go the same way.
+   */
+  const emailChanged = fields.email !== undefined && fields.email !== String(user.email ?? '').toLowerCase();
+  if (fields.active === 0 || emailChanged) {
     db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+    db.prepare('DELETE FROM login_tokens WHERE user_id = ?').run(id);
   }
-  res.json({ user: db.prepare('SELECT id, username, email, name, role, company, active FROM users WHERE id = ?').get(id) });
+  res.json({ user: db.prepare(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`).get(id) });
+});
+
+/** Whether the server can send the sign-in e-mails, for Settings. */
+metaRouter.get('/settings/mail', requireRole('admin'), (_req, res) => {
+  const { host, port, from } = mailConfig();
+  res.json({ configured: mailConfigured(), host, port, from, public_url: publicUrl() });
+});
+
+/** A test message to the admin who asked, so a broken setup shows before anyone needs to sign in. */
+metaRouter.post('/settings/mail/test', requireRole('admin'), async (req, res) => {
+  if (!req.user.email) return res.status(400).json({ error: 'Your own account has no e-mail address to send to' });
+  try {
+    const sent = await sendMail({
+      to: req.user.email,
+      subject: 'Integration Tracker: test e-mail',
+      text: `This is a test from the Integration Tracker${publicUrl() ? ` at ${publicUrl()}` : ''}.
+
+If it reached you, sign-in e-mails will too.`,
+    });
+    res.json({ ok: true, to: req.user.email, ...sent });
+  } catch (err) {
+    res.status(502).json({ error: `Sending failed: ${err.message}` });
+  }
 });
 
 /** Sheet-compatible export, so the old workbook can still be produced on demand. */

@@ -1,39 +1,30 @@
-import { randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { db } from './db.js';
 
-const SESSION_DAYS = 30;
+/**
+ * A sign-in lasts seven days from the moment it happened, then the person asks
+ * for a new e-mail. Fixed rather than sliding, so a session left open on a
+ * shared machine does not live for ever.
+ */
+export const SESSION_DAYS = 7;
 export const SESSION_COOKIE = 'it_session';
-
-/** scrypt output length. Fixed, because the comparison depends on it. */
-const KEY_BYTES = 64;
-
-export function hashPassword(plain) {
-  const salt = randomBytes(16).toString('hex');
-  const hash = scryptSync(plain, salt, KEY_BYTES).toString('hex');
-  return `scrypt$${salt}$${hash}`;
-}
-
-export function verifyPassword(plain, stored) {
-  const [scheme, salt, hash] = String(stored).split('$');
-  if (scheme !== 'scrypt' || !salt || !hash) return false;
-
-  const expected = Buffer.from(hash, 'hex');
-  /*
-   * Fail closed on a hash that is not a full scrypt output. The derivation used
-   * to take its length from the stored value, so an unparseable hash - a
-   * truncated column, a half-restored backup - produced two empty buffers, and
-   * timingSafeEqual calls two empty buffers equal. Every password got in.
-   */
-  if (expected.length !== KEY_BYTES) return false;
-
-  return timingSafeEqual(expected, scryptSync(plain, salt, KEY_BYTES));
-}
 
 export function createSession(userId) {
   const id = randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + SESSION_DAYS * 864e5);
   db.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)').run(id, userId, expires.toISOString());
+  db.prepare("UPDATE users SET last_login_at = datetime('now') WHERE id = ?").run(userId);
+  // Expired sessions are only ever looked at to be refused; no need to keep them.
+  db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(new Date().toISOString());
   return { id, expires };
+}
+
+/** omerp@primis.tech -> "omerp", or "omerp2" if that is taken. */
+export function usernameFor(address) {
+  const base = address.split('@')[0].toLowerCase().replace(/[^a-z0-9._-]+/g, '') || 'user';
+  let candidate = base;
+  for (let n = 2; db.prepare('SELECT 1 FROM users WHERE username = ?').get(candidate); n += 1) candidate = `${base}${n}`;
+  return candidate;
 }
 
 export function destroySession(id) {
