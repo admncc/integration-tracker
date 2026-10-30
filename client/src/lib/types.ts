@@ -185,3 +185,27 @@ export interface RpmRow {
   primis_base: number;
   uplift: number;
 }
+
+export type ProspectStatus = 'new' | 'mostly_blocked' | 'removed';
+
+/** A candidate domain on the potential-projects list. */
+export interface Prospect {
+  id: number;
+  domain: string;
+  status: ProspectStatus;
+  created_at: string;
+  updated_at: string;
+  added_by_name: string | null;
+  /** Set when the domain has since become a tracked site. */
+  site_id: number | null;
+}
+
+export interface ProspectImport {
+  added: number;
+  already_listed: string[];
+  already_tracked: string[];
+  repeated: string[];
+  invalid: string[];
+  invalid_count: number;
+  prospects: Prospect[];
+}

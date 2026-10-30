@@ -164,6 +164,17 @@ CREATE TABLE IF NOT EXISTS activity (
 );
 CREATE INDEX IF NOT EXISTS idx_activity_site ON activity(site_id, id DESC);
 CREATE INDEX IF NOT EXISTS idx_activity_issue ON activity(issue_id, id DESC);
+
+-- Potential projects: candidate domains, before any of them becomes a site.
+CREATE TABLE IF NOT EXISTS prospects (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  domain     TEXT NOT NULL UNIQUE,
+  status     TEXT NOT NULL DEFAULT 'new',
+  added_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_prospects_status ON prospects(status);
 `);
 
 /*

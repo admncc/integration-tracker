@@ -9,6 +9,16 @@ Built for the Primis rollout, but nothing in it is Primis-specific.
 
 ## What it does
 
+**Potential projects** - the first tab under Sites: candidate domains before
+any of them becomes a project. Paste a list or load a .txt file (one domain per
+line; commas, spaces and full URLs work too), and each domain gets a status -
+NEW, MOSTLY BLOCKED or REMOVED - changed per row or across a selection. Repeats,
+domains already on the list and domains that are already tracked sites are
+skipped and reported. REMOVED keeps the record that a domain was looked at;
+"Delete from list" is for a paste that went wrong. The list is kept apart from
+the sites table on purpose, so a batch of candidates never reaches the rollout
+numbers, the dashboard or anybody's "waiting on you".
+
 **Sites** - one row per domain, with the five tracks from the old sheet (video,
 display, ads.txt, ad tag, MCM) plus CMP and partner approval. Every cell is
 editable in place, every column filterable and sortable. Domains can be added,

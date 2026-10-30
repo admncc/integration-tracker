@@ -4,7 +4,7 @@ import { Spinner } from './components/ui';
 import Inbox from './components/Inbox';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
-import Sites from './pages/Sites';
+import SitesPage from './pages/SitesPage';
 import SiteDetail from './pages/SiteDetail';
 import Issues from './pages/Issues';
 import IssueDetail from './pages/IssueDetail';
@@ -13,7 +13,7 @@ import Account from './pages/Account';
 
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
-  { to: '/sites', label: 'Sites' },
+  { to: '/sites?view=potentials', label: 'Sites' },
   { to: '/issues', label: 'Issues' },
   // Settings is admin only; it holds users, the exchange rate and the importer.
   { to: '/settings', label: 'Settings', adminOnly: true },
@@ -69,7 +69,7 @@ export default function App() {
       <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6">
         <Routes>
           <Route path="/" element={<Dashboard />} />
-          <Route path="/sites" element={<Sites />} />
+          <Route path="/sites" element={<SitesPage />} />
           <Route path="/sites/:id" element={<SiteDetail />} />
           <Route path="/issues" element={<Issues />} />
           <Route path="/issues/:id" element={<IssueDetail />} />

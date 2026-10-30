@@ -14,6 +14,7 @@ import { authRouter } from './routes/auth.js';
 import { sitesRouter } from './routes/sites.js';
 import { issuesRouter } from './routes/issues.js';
 import { metaRouter } from './routes/meta.js';
+import { prospectsRouter } from './routes/prospects.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const clientDist = resolve(here, '../dist');
@@ -74,6 +75,7 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/sites', sitesRouter);
 app.use('/api/issues', issuesRouter);
+app.use('/api/prospects', prospectsRouter);
 app.use('/api', metaRouter);
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown endpoint' }));

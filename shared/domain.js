@@ -212,3 +212,14 @@ export function siteCompletion(site) {
   const done = TRACKS.filter(({ key }) => site[key] === 'live').length;
   return Math.round((done / TRACKS.length) * 100);
 }
+
+/**
+ * The list before the list: domains that might become a project. Kept apart
+ * from the sites table so a pasted batch of 300 candidates never touches the
+ * rollout numbers, the dashboard or anybody's "waiting on you".
+ */
+export const PROSPECT_STATUS = {
+  new:            { label: 'NEW',            tone: 'blue'  },
+  mostly_blocked: { label: 'MOSTLY BLOCKED', tone: 'amber' },
+  removed:        { label: 'REMOVED',        tone: 'muted' },
+};
