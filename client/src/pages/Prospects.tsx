@@ -45,7 +45,7 @@ type FieldKey = (typeof FIELDS)[number]['key'];
  * Potential Sites: candidate domains and where each one stands.
  *
  * Two questions, kept apart because they move independently: where the project
- * stands with us (new, live, removed) and how the domain itself came out of the
+ * stands with us (new, failed) and how the domain itself came out of the
  * check (submitted for approval, good, mostly blocked). A domain that works out
  * is added on the Sites tab, where the rollout columns are.
  */
@@ -63,7 +63,7 @@ export default function Prospects() {
   // Starting an integration adds a domain to the sites table - the publisher's call, as adding one by hand is.
   const canConvert = can('manage_sites');
   const [bulkField, setBulkField] = useState<FieldKey>('project_status');
-  const [bulkValue, setBulkValue] = useState<string>('removed');
+  const [bulkValue, setBulkValue] = useState<string>('failed');
 
   useEffect(() => {
     api
@@ -179,7 +179,7 @@ export default function Prospects() {
 
   async function deleteSelected() {
     const ids = [...selected];
-    if (!window.confirm(`Delete ${ids.length} domain(s) from the list for good?\n\nA project status of REMOVED keeps the record instead.`)) return;
+    if (!window.confirm(`Delete ${ids.length} domain(s) from the list for good?\n\nA project status of FAILED keeps the record instead.`)) return;
     setBusy(true);
     setNotice(null);
     try {
@@ -399,7 +399,7 @@ export default function Prospects() {
                   <td className="truncate px-3 py-1.5" title={prospect.domain}>
                     <span
                       className={
-                        prospect.project_status === 'removed' ? 'text-ink-faint line-through decoration-1' : 'font-medium'
+                        prospect.project_status === 'failed' ? 'text-ink-faint line-through decoration-1' : 'font-medium'
                       }
                     >
                       {prospect.domain}

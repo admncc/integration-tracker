@@ -233,9 +233,8 @@ export function siteCompletion(site) {
  * how the domain itself came out of the check.
  */
 export const PROJECT_STATUS = {
-  new:     { label: 'NEW',     tone: 'blue'  },
-  live:    { label: 'LIVE',    tone: 'green' },
-  removed: { label: 'REMOVED', tone: 'muted' },
+  new:    { label: 'NEW',    tone: 'blue' },
+  failed: { label: 'FAILED', tone: 'red'  },
 };
 
 export const DOMAIN_STATUS = {

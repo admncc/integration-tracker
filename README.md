@@ -19,20 +19,20 @@ Built for the Primis rollout, but nothing in it is Primis-specific.
 **Potential Sites** - the first tab under Sites: candidate domains before
 any of them becomes a project. Paste a list or load a .txt file (one domain per
 line; commas, spaces and full URLs work too). Each domain carries two statuses
-that move independently - a **project status** (NEW, LIVE, REMOVED) and a
+that move independently - a **project status** (NEW, FAILED) and a
 **domain status** (NEW, DOMAIN SUBMITTED FOR APPROVAL, GOOD, MOSTLY BLOCKED) -
 changed per row or across a selection. A star marks **high potential**: those
 rows are highlighted and always listed first, whatever was pasted after them.
 Repeats, domains already on the list and domains that are already tracked sites
-are skipped and reported. A project status of REMOVED keeps the record that a
-domain was looked at; "Delete from list" is for a paste that went wrong. The
+are skipped and reported. A project status of FAILED keeps the record that a
+domain was looked at and did not work out; "Delete from list" is for a paste that went wrong. The
 list is kept apart from the sites table on purpose, so a batch of candidates
 never reaches the rollout numbers, the dashboard or anybody's "waiting on you".
 
 **Convert to Integration** - the highlighted button at the end of each row, or
 for a whole selection. It adds the domain to **Sites in integration process**
-at priority 1 with every track on Pending, and sets its project status to LIVE;
-the row stays on the list as the record, with a link to the new site. Starting
+at priority 1 with every track on Pending; the row stays on the list as the
+record, with a link to the new site. Starting
 an integration is the publisher's call, as adding a domain by hand is.
 
 **Sites in integration process** - one row per domain, with the five tracks from the old sheet (video,

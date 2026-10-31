@@ -196,7 +196,7 @@ export interface RpmRow {
   uplift: number;
 }
 
-export type ProjectStatus = 'new' | 'live' | 'removed';
+export type ProjectStatus = 'new' | 'failed';
 export type DomainStatus = 'new' | 'submitted' | 'good' | 'mostly_blocked';
 
 /** A candidate domain on the potential-projects list. */

@@ -420,6 +420,16 @@ if (prospectColumns.includes('status') && !getSetting('prospect_status_split')) 
   `);
   setSetting('prospect_status_split', '1');
 }
+/*
+ * The project status became NEW / FAILED. REMOVED meant looked at and turned
+ * down, which is FAILED now; LIVE was only ever set by "Convert to
+ * Integration", and the row shows that through its link to the site anyway.
+ * Idempotent - neither old value is valid any more.
+ */
+db.exec(`
+  UPDATE prospects SET project_status = 'failed' WHERE project_status = 'removed';
+  UPDATE prospects SET project_status = 'new' WHERE project_status = 'live';
+`);
 db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_project ON prospects(project_status)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_domain ON prospects(domain_status)');
 

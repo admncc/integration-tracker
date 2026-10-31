@@ -184,8 +184,8 @@ prospectsRouter.patch('/bulk', (req, res) => {
 /**
  * "Convert to Integration": the candidate becomes a site in the integration
  * process - priority 1, every track Pending, CMP and approval at their
- * starting values. The candidate stays on this list, its project status set to
- * LIVE and linked to the new site, as the record of where it came from.
+ * starting values. The candidate stays on this list, linked to the new site
+ * ("In integration"), as the record of where it came from.
  *
  * The same people who can add a domain to the sites table can do this.
  */
@@ -206,18 +206,15 @@ prospectsRouter.post('/convert', (req, res) => {
     `INSERT INTO sites (domain, priority, status_video, status_display, status_ads_txt, status_ad_tag, status_mcm, cmp, approval)
      VALUES (?, 1, 'pending', 'pending', 'pending', 'pending', 'pending', 'none', 'none')`
   );
-  const markLive = db.prepare("UPDATE prospects SET project_status = 'live', updated_at = datetime('now') WHERE id = ?");
 
   db.exec('BEGIN');
   try {
     for (const row of rows) {
       if (db.prepare('SELECT 1 FROM sites WHERE domain = ?').get(row.domain)) {
         alreadyTracked.push(row.domain);
-        markLive.run(row.id);
         continue;
       }
       const siteId = Number(createSite.run(row.domain).lastInsertRowid);
-      markLive.run(row.id);
       logActivity({ siteId, actorId: req.user.id, kind: 'site_created', newValue: `${row.domain} (from Potential Sites)` });
       converted.push({ prospect_id: row.id, site_id: siteId, domain: row.domain });
     }
@@ -231,7 +228,7 @@ prospectsRouter.post('/convert', (req, res) => {
 });
 
 /**
- * Takes rows off the list for good. A project status of REMOVED keeps the
+ * Takes rows off the list for good. A project status of FAILED keeps the
  * record that a domain was looked at and turned down; this is for a paste that
  * went wrong.
  */
