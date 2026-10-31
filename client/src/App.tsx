@@ -12,12 +12,14 @@ import Issues from './pages/Issues';
 import IssueDetail from './pages/IssueDetail';
 import Settings from './pages/Settings';
 import Account from './pages/Account';
+import Log from './pages/Log';
 
 const NAV = [
   { to: '/', label: 'Dashboard', end: true },
   { to: '/sites?view=potentials', label: 'Sites' },
   { to: '/issues', label: 'Issues' },
   // Settings is admin only; it holds users, the exchange rate and the importer.
+  { to: '/log', label: 'Log', adminOnly: true },
   { to: '/settings', label: 'Settings', adminOnly: true },
 ];
 
@@ -80,6 +82,7 @@ export default function App() {
           <Route path="/account" element={<Account />} />
           {/* A non-admin reaching this by hand is sent home rather than shown a page that 403s. */}
           <Route path="/settings" element={user.role === 'admin' ? <Settings /> : <Navigate to="/" replace />} />
+          <Route path="/log" element={user.role === 'admin' ? <Log /> : <Navigate to="/" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

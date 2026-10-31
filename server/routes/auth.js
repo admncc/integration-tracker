@@ -15,6 +15,7 @@ import {
 } from '../lib/login.js';
 import { mailConfigured, sendMail } from '../lib/mail.js';
 import { activeBlock, blockedMessage, clearFailures, clientIp, recordFailure } from '../lib/lockout.js';
+import { logUser, touchLastSeen } from '../lib/userlog.js';
 
 export const authRouter = Router();
 
@@ -60,9 +61,14 @@ function refuseIfBlocked(req, res) {
 }
 
 /** A failed attempt: counted, and if it was the last one allowed, said so. */
-function failed(req, res, kind, message) {
-  const block = recordFailure(clientIp(req), kind);
-  if (block) return res.status(429).json({ error: blockedMessage(block), blocked_until: block.until });
+function failed(req, res, kind, message, attempted = '') {
+  const ip = clientIp(req);
+  const block = recordFailure(ip, kind);
+  logUser({ ip, kind: 'login_failed', detail: kind === 'code' ? `wrong code for ${attempted}` : 'a sign-in link that was never sent', status: 401 });
+  if (block) {
+    logUser({ ip, kind: 'blocked', detail: `connection blocked until ${block.until} after ${block.failures} failed sign-ins`, status: 429 });
+    return res.status(429).json({ error: blockedMessage(block), blocked_until: block.until });
+  }
   res.status(401).json({ error: message });
 }
 
@@ -72,8 +78,10 @@ function userByEmail(address) {
   return db.prepare('SELECT id, name, email FROM users WHERE lower(email) = ? AND active = 1').get(address);
 }
 
-function signIn(req, res, userId) {
+function signIn(req, res, userId, how) {
   clearFailures(clientIp(req));
+  logUser({ userId, ip: clientIp(req), kind: 'login', detail: `signed in with the ${how} from the e-mail`, status: 200 });
+  touchLastSeen(userId);
   const session = createSession(userId);
   res.cookie(SESSION_COOKIE, session.id, cookieOptions(req));
   const user = db.prepare('SELECT id, username, email, name, role, company FROM users WHERE id = ?').get(userId);
@@ -113,6 +121,12 @@ authRouter.post('/login/email', (req, res) => {
   res.json({ ok: true, email: parsed.data.email });
 
   const user = userByEmail(parsed.data.email);
+  logUser({
+    userId: user?.id ?? null,
+    ip,
+    kind: 'login_requested',
+    detail: user ? 'asked for a sign-in e-mail' : `asked for a sign-in e-mail for ${parsed.data.email} (no such account)`,
+  });
   // An unknown address and one that has had its five e-mails this hour look the same from outside.
   if (!user || mailsLastHour(user.id) >= MAX_MAILS_PER_HOUR) return;
   deliverSignInMail(user, ip);
@@ -129,9 +143,9 @@ authRouter.post('/login/code', (req, res) => {
 
   const user = userByEmail(parsed.data.email);
   if (!user || !redeemCode(user.id, parsed.data.code)) {
-    return failed(req, res, 'code', 'That code is wrong or has expired. Check the newest e-mail, or ask for a new one.');
+    return failed(req, res, 'code', 'That code is wrong or has expired. Check the newest e-mail, or ask for a new one.', parsed.data.email);
   }
-  signIn(req, res, user.id);
+  signIn(req, res, user.id, 'code');
 });
 
 /**
@@ -152,10 +166,11 @@ authRouter.post('/login/link', (req, res) => {
     if (linkWasIssued(parsed.data.token)) return res.status(401).json({ error: message });
     return failed(req, res, 'link', message);
   }
-  signIn(req, res, userId);
+  signIn(req, res, userId, 'link');
 });
 
 authRouter.post('/logout', (req, res) => {
+  if (req.user) logUser({ userId: req.user.id, ip: clientIp(req), kind: 'logout', detail: 'signed out', status: 200 });
   const id = req.cookies?.[SESSION_COOKIE];
   if (id) destroySession(id);
   res.clearCookie(SESSION_COOKIE, { path: '/' });

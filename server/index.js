@@ -11,6 +11,7 @@ import { attachUser } from './lib/auth.js';
 import { startDailyRefresh } from './lib/fx.js';
 import { startDailyDigest } from './lib/digest.js';
 import { startNotifications } from './lib/notify.js';
+import { startUserLog, userLogMiddleware } from './lib/userlog.js';
 import { authRouter } from './routes/auth.js';
 import { sitesRouter } from './routes/sites.js';
 import { issuesRouter } from './routes/issues.js';
@@ -59,6 +60,8 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '2mb' }));
 app.use(cookieParser());
 app.use(attachUser);
+// Who did what, for the admin's log (kept seven days).
+app.use(userLogMiddleware);
 
 /*
  * Touches the database rather than just proving the process is listening. With
@@ -144,6 +147,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.env.DISABLE_DIGEST !== '1') startDailyDigest();
   // Update e-mails to the people following each site; nothing goes out without PUBLIC_URL and SMTP.
   if (process.env.DISABLE_NOTIFICATIONS !== '1') startNotifications();
+  // Deletes log entries older than seven days, now and every hour.
+  startUserLog();
 
   app.listen(port, host, () => {
     console.log(`Integration Tracker API on http://${host ?? 'localhost'}:${port}`);

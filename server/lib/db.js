@@ -76,6 +76,21 @@ CREATE TABLE IF NOT EXISTS ip_blocks (
   failures   INTEGER NOT NULL DEFAULT 0
 );
 
+-- The admin's log of who signed in, from where, and what they did
+-- (server/lib/userlog.js). Kept seven days, then deleted. The history of each
+-- site (activity) is separate and stays.
+CREATE TABLE IF NOT EXISTS user_log (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+  ip         TEXT,
+  kind       TEXT NOT NULL,
+  detail     TEXT NOT NULL DEFAULT '',
+  status     INTEGER,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_log_created ON user_log(created_at);
+CREATE INDEX IF NOT EXISTS idx_user_log_user ON user_log(user_id, created_at);
+
 -- Who gets e-mailed about changes on a site (server/lib/notify.js). A row with
 -- watching = 0 is an opt-out and is kept, so being active on the site again
 -- does not quietly sign the person back up.
@@ -268,6 +283,8 @@ const LATE_COLUMNS = [
   // Update e-mails: everything off for this person, and the key in their opt-out links.
   ['users', 'notify_enabled', 'INTEGER NOT NULL DEFAULT 1'],
   ['users', 'notify_token', 'TEXT'],
+  // The last request this person made, for "online now" in the log.
+  ['users', 'last_seen_at', 'TEXT'],
 ];
 
 for (const [table, column, definition] of LATE_COLUMNS) {

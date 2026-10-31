@@ -5,6 +5,7 @@ import { requireAuth, requireRole, usernameFor } from '../lib/auth.js';
 import { mailConfig, mailConfigured, sendMail } from '../lib/mail.js';
 import { publicUrl } from '../lib/login.js';
 import { BLOCK_HOURS, MAX_FAILURES, listBlocks, unblock } from '../lib/lockout.js';
+import { KEEP_DAYS, ONLINE_MINUTES } from '../lib/userlog.js';
 import { APPROVAL, CMP, DEFAULT_EUR_USD, DEMAND_BLOCK, FX_SETTING_KEY, OPEN_ISSUE_STATUSES, TRACKS, TRACK_STATUS } from '../../shared/domain.js';
 import { FX_KEYS, fxState, refreshRate } from '../lib/fx.js';
 import { DIGEST_KEYS, buildDigest, digestPayload, digestState, isQuiet, sendDigest } from '../lib/digest.js';
@@ -438,6 +439,58 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
     db.prepare('DELETE FROM login_tokens WHERE user_id = ?').run(id);
   }
   res.json({ user: db.prepare(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`).get(id) });
+});
+
+/**
+ * The admin's log: who is online, when each person last signed in, and the
+ * last seven days of sign-ins and actions.
+ */
+const LOG_KINDS = {
+  logins: ['login', 'logout', 'login_requested'],
+  failed: ['login_failed', 'blocked'],
+  actions: ['action'],
+};
+
+metaRouter.get('/log', requireRole('admin'), (req, res) => {
+  const parsed = z
+    .object({
+      user_id: z.coerce.number().int().positive().optional(),
+      kind: z.enum(['all', ...Object.keys(LOG_KINDS)]).default('all'),
+      limit: z.coerce.number().int().min(1).max(2000).default(500),
+    })
+    .safeParse(req.query);
+  if (!parsed.success) return res.status(400).json({ error: 'Unknown filter' });
+  const { user_id: userId, kind, limit } = parsed.data;
+
+  const people = db
+    .prepare(
+      `SELECT id, name, company, role, active, last_login_at, last_seen_at,
+              (last_seen_at >= datetime('now', '-${ONLINE_MINUTES} minutes')) AS online
+         FROM users ORDER BY online DESC, COALESCE(last_seen_at, last_login_at, '') DESC, name`
+    )
+    .all()
+    .map((row) => ({ ...row, online: row.online === 1 }));
+
+  const where = [`l.created_at >= datetime('now', '-${KEEP_DAYS} days')`];
+  const params = [];
+  if (userId) {
+    where.push('l.user_id = ?');
+    params.push(userId);
+  }
+  if (kind !== 'all') {
+    where.push(`l.kind IN (${LOG_KINDS[kind].map(() => '?').join(',')})`);
+    params.push(...LOG_KINDS[kind]);
+  }
+  const entries = db
+    .prepare(
+      `SELECT l.id, l.created_at, l.user_id, u.name AS user_name, u.company AS user_company, l.ip, l.kind, l.detail, l.status
+         FROM user_log l LEFT JOIN users u ON u.id = l.user_id
+        WHERE ${where.join(' AND ')}
+        ORDER BY l.id DESC LIMIT ?`
+    )
+    .all(...params, limit);
+
+  res.json({ people, entries, keep_days: KEEP_DAYS, online_minutes: ONLINE_MINUTES });
 });
 
 /** Connections locked out of signing in after too many failed attempts. */

@@ -194,6 +194,19 @@ hidden in the interface. A developer can close an issue as **won't fix**, which
 is terminal too; that is deliberate, so a finding the publisher disagrees with
 does not sit open forever, and it shows in the history with their name on it.
 
+## Log (admins)
+
+**Log** in the menu shows who is online right now (active in the last five
+minutes), when each person was last seen and last signed in, and the last seven
+days of activity: sign-ins and how (code or link), sign-outs, requests for a
+sign-in e-mail, failed sign-ins and blocked connections, every change anybody
+made - refused ones included, with the status - and every CSV export, each
+with the time and the address it came from. Reading is not logged. Entries
+older than seven days are deleted automatically, at start-up and every hour.
+
+This is separate from the history on each site's page, which is part of the
+project record and is kept.
+
 ## Update e-mails
 
 Everybody who has done something on a site - changed a value, raised an issue,
@@ -299,6 +312,8 @@ server/          Express API, plain ESM, no build step
   lib/login.js   sign-in e-mails: link and code, hashed, one hour, one use
   lib/mail.js    SMTP via nodemailer
   lib/notify.js  update e-mails: who follows a site, batching, opt-out
+  lib/lockout.js 3 failed sign-ins per address -> 24 hours locked out
+  lib/userlog.js the admin's log of sign-ins and actions, kept 7 days
   lib/sheet.js   CSV parsing and the Google Sheet vocabulary
   lib/fx.js      ECB daily reference rate
   lib/uploads.js attachment storage
