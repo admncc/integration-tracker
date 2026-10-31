@@ -95,12 +95,9 @@ export default function Login() {
   return (
     <div className="grid min-h-full place-items-center px-4">
       <div className="card w-full max-w-sm space-y-5 p-6 shadow-sm">
-        <div className="space-y-3">
-          <h1>
-            <Logo size="lg" />
-          </h1>
-          <p className="text-sm text-ink-soft">Site rollout and QA between the publisher and the demand partner.</p>
-        </div>
+        <h1>
+          <Logo size="lg" />
+        </h1>
 
         {expired && !error && step === 'email' && (
           <p className="rounded-lg bg-tone-amber-bg px-3 py-2 text-sm text-tone-amber">
