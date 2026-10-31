@@ -34,12 +34,15 @@ export default function SiteDetail() {
   const [composing, setComposing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+  /** Whether you get update e-mails about this site. */
+  const [watching, setWatching] = useState(false);
 
   const load = useCallback(() => {
     return api
-      .get<{ site: Site; issues: Issue[]; activity: ActivityEntry[]; messages: SiteMessage[] }>(`/sites/${id}`)
+      .get<{ site: Site; issues: Issue[]; activity: ActivityEntry[]; messages: SiteMessage[]; watching: boolean }>(`/sites/${id}`)
       .then((r) => {
         setSite(r.site);
+        setWatching(r.watching);
         setIssues(r.issues);
         setActivity(r.activity);
         setMessages(r.messages);
@@ -137,6 +140,20 @@ export default function SiteDetail() {
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
+          <Button
+            title={watching ? 'You get an e-mail when something changes here. Click to stop.' : 'Get an e-mail when something changes here'}
+            aria-pressed={watching}
+            onClick={async () => {
+              try {
+                const r = await api.put<{ watching: boolean }>(`/notifications/sites/${site.id}`, { watching: !watching });
+                setWatching(r.watching);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'Could not change your updates');
+              }
+            }}
+          >
+            {watching ? '🔔 Updates by e-mail: on' : '🔕 Updates by e-mail: off'}
+          </Button>
           <Button variant="primary" onClick={() => setComposing(true)}>+ New issue</Button>
         </div>
       </div>
@@ -725,6 +742,8 @@ function describe(entry: ActivityEntry, users: User[] = []) {
       return <>restored the issue "{entry.new_value}"</>;
     case 'message_posted':
       return <>wrote in the discussion: "{entry.new_value}"</>;
+    case 'comment_added':
+      return <>commented: "{entry.new_value}"</>;
     case 'site_deleted':
       return <>deleted the domain {entry.new_value}</>;
     case 'issue_status':

@@ -10,11 +10,13 @@ import { db, setSetting } from './lib/db.js';
 import { attachUser } from './lib/auth.js';
 import { startDailyRefresh } from './lib/fx.js';
 import { startDailyDigest } from './lib/digest.js';
+import { startNotifications } from './lib/notify.js';
 import { authRouter } from './routes/auth.js';
 import { sitesRouter } from './routes/sites.js';
 import { issuesRouter } from './routes/issues.js';
 import { metaRouter } from './routes/meta.js';
 import { prospectsRouter } from './routes/prospects.js';
+import { notificationsRouter } from './routes/notifications.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const clientDist = resolve(here, '../dist');
@@ -76,6 +78,8 @@ app.use('/api/auth', authRouter);
 app.use('/api/sites', sitesRouter);
 app.use('/api/issues', issuesRouter);
 app.use('/api/prospects', prospectsRouter);
+// Before the catch-all /api router, which requires a sign-in: opting out from an e-mail must not.
+app.use('/api/notifications', notificationsRouter);
 app.use('/api', metaRouter);
 
 app.use('/api', (_req, res) => res.status(404).json({ error: 'Unknown endpoint' }));
@@ -128,6 +132,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (process.env.DISABLE_FX_REFRESH !== '1') startDailyRefresh();
   // No-op until an admin sets a webhook URL in Settings.
   if (process.env.DISABLE_DIGEST !== '1') startDailyDigest();
+  // Update e-mails to the people following each site; nothing goes out without PUBLIC_URL and SMTP.
+  if (process.env.DISABLE_NOTIFICATIONS !== '1') startNotifications();
 
   app.listen(port, host, () => {
     console.log(`Integration Tracker API on http://${host ?? 'localhost'}:${port}`);

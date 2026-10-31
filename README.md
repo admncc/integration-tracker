@@ -182,6 +182,30 @@ hidden in the interface. A developer can close an issue as **won't fix**, which
 is terminal too; that is deliberate, so a finding the publisher disagrees with
 does not sit open forever, and it shows in the history with their name on it.
 
+## Update e-mails
+
+Everybody who has done something on a site - changed a value, raised an issue,
+commented, written in its discussion - gets an e-mail when something changes
+there from then on. So does whoever is made responsible for it or is assigned an
+issue on it. The publisher's admins get them for every site without doing
+anything. Nobody hears about their own changes.
+
+Changes are collected for a few minutes (`NOTIFY_BATCH_MINUTES`, default 3) and
+go out as one e-mail per person, so a sweep across forty domains is one
+message. A site flagged as mostly blocked by demand partners comes first and
+puts "ALERT" in the subject.
+
+Every e-mail ends with a big **Stop updates for <domain>** per site and a
+**Stop all update e-mails** link. They open a page that asks for one click
+rather than acting on being opened - mail filters open every link in a message
+before the recipient does. Mail apps that offer their own unsubscribe button
+(Gmail, Apple Mail) use the one-click header instead. An opt-out sticks: doing
+something on the site again does not sign you back up. The switch on each site's
+page and the list under your own name turn it back on.
+
+Nothing goes out without `PUBLIC_URL` and the SMTP settings - an update e-mail
+without a working opt-out link is not sent.
+
 ## Knowing it is your turn
 
 Every handoff here crosses a company boundary, so the tool has to say whose turn
@@ -248,6 +272,8 @@ nginx, a certificate and backups. Ready-made unit and nginx files are in
 | `SMTP_USER`, `SMTP_PASS`, `SMTP_SECURE` | unset | for a relay that wants a login; `SMTP_SECURE=1` for TLS from the start |
 | `MAIL_FROM` | unset | sender of the sign-in e-mails |
 | `ADMIN_EMAIL` | placeholder | the seeded admin account's address |
+| `NOTIFY_BATCH_MINUTES` | `3` | how long update e-mails collect changes before going out |
+| `DISABLE_NOTIFICATIONS` | unset | set to `1` to send no update e-mails at all |
 
 Everything worth keeping lives under `data/` - back up that directory and you
 have the whole tracker.
@@ -260,6 +286,7 @@ server/          Express API, plain ESM, no build step
   lib/auth.js    cookie sessions (7 days), role guards
   lib/login.js   sign-in e-mails: link and code, hashed, one hour, one use
   lib/mail.js    SMTP via nodemailer
+  lib/notify.js  update e-mails: who follows a site, batching, opt-out
   lib/sheet.js   CSV parsing and the Google Sheet vocabulary
   lib/fx.js      ECB daily reference rate
   lib/uploads.js attachment storage

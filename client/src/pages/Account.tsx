@@ -1,6 +1,9 @@
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
+import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import { ROLES } from '@shared/domain.js';
-import { Badge, type Tone } from '../components/ui';
+import { Badge, Button, type Tone } from '../components/ui';
 
 const ROLE_TONE: Record<string, Tone> = { admin: 'blue', dev: 'slate', partner: 'purple' };
 
@@ -46,6 +49,8 @@ export default function Account() {
         </p>
       </section>
 
+      <UpdatesPanel />
+
       <section className="card p-4">
         <h2 className="mb-2 text-sm font-semibold">Signing in</h2>
         <p className="text-sm text-ink-soft">
@@ -57,5 +62,103 @@ export default function Account() {
         </p>
       </section>
     </div>
+  );
+}
+
+interface Updates {
+  enabled: boolean;
+  every_site: boolean;
+  watching: { id: number; domain: string; reason: string }[];
+  muted: { id: number; domain: string }[];
+}
+
+const REASON: Record<string, string> = {
+  active: 'you worked on it',
+  responsible: 'you are responsible',
+  assigned: 'work assigned to you',
+  chosen: 'you switched it on',
+};
+
+/** Your update e-mails: on or off altogether, and which sites they cover. */
+function UpdatesPanel() {
+  const [data, setData] = useState<Updates | null>(null);
+  const [error, setError] = useState('');
+
+  const load = () =>
+    api
+      .get<Updates>('/notifications/me')
+      .then(setData)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not load'));
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function run(action: () => Promise<unknown>) {
+    setError('');
+    try {
+      await action();
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not change it');
+    }
+  }
+
+  if (!data) return null;
+  return (
+    <section className="card p-4">
+      <div className="mb-2 flex flex-wrap items-center gap-3">
+        <h2 className="text-sm font-semibold">Update e-mails</h2>
+        <Badge tone={data.enabled ? 'green' : 'muted'}>{data.enabled ? 'On' : 'Off'}</Badge>
+        <Button size="sm" className="ml-auto" onClick={() => run(() => api.patch('/notifications/me', { enabled: !data.enabled }))}>
+          {data.enabled ? 'Turn all off' : 'Turn on'}
+        </Button>
+      </div>
+      <p className="text-sm text-ink-soft">
+        {data.every_site
+          ? 'You get an e-mail when something changes on any site - a few minutes of changes at a time, never your own.'
+          : 'You get an e-mail when something changes on a site you worked on, are responsible for or have work assigned on - a few minutes of changes at a time, never your own.'}{' '}
+        Every e-mail has a link to stop it for that site.
+      </p>
+      {error && <p className="mt-2 rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{error}</p>}
+
+      {data.enabled && !data.every_site && (
+        <ul className="mt-3 divide-y divide-line text-sm">
+          {data.watching.length === 0 && <li className="py-1.5 text-ink-faint">No sites yet.</li>}
+          {data.watching.map((site) => (
+            <li key={site.id} className="flex items-center gap-2 py-1.5">
+              <Link to={`/sites/${site.id}`} className="font-medium hover:text-brand hover:underline">{site.domain}</Link>
+              <span className="text-xs text-ink-faint">{REASON[site.reason] ?? ''}</span>
+              <button
+                type="button"
+                className="ml-auto text-xs text-ink-soft hover:text-tone-red hover:underline"
+                onClick={() => run(() => api.put(`/notifications/sites/${site.id}`, { watching: false }))}
+              >
+                Stop
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {data.enabled && data.muted.length > 0 && (
+        <div className="mt-3">
+          <h3 className="text-xs font-medium text-ink-faint">Stopped for</h3>
+          <ul className="mt-1 flex flex-wrap gap-1.5">
+            {data.muted.map((site) => (
+              <li key={site.id}>
+                <button
+                  type="button"
+                  title="Get updates about this site again"
+                  className="rounded-full border border-line px-2 py-0.5 text-xs text-ink-soft hover:border-brand hover:text-brand"
+                  onClick={() => run(() => api.put(`/notifications/sites/${site.id}`, { watching: true }))}
+                >
+                  {site.domain} · turn back on
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </section>
   );
 }

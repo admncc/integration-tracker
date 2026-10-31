@@ -34,6 +34,8 @@ function describe(entry: ActivityEntry) {
       return `restored this issue`;
     case 'attachment_added':
       return `attached ${entry.new_value}`;
+    case 'comment_added':
+      return `commented: "${entry.new_value}"`;
     case 'issue_status':
       return `changed status to ${ISSUE_STATUS[entry.new_value as keyof typeof ISSUE_STATUS]?.label ?? entry.new_value}`;
     default: {

@@ -4,6 +4,7 @@ import { db, logActivity } from '../lib/db.js';
 import { requireAuth, requireRole } from '../lib/auth.js';
 import { removeUpload } from '../lib/uploads.js';
 import { normaliseDomain } from '../lib/sheet.js';
+import { isWatching } from '../lib/notify.js';
 import { APPROVAL, CMP, CURRENCIES, DEMAND_BLOCK, OPEN_ISSUE_STATUSES, TRACK_STATUS } from '../../shared/domain.js';
 
 export const sitesRouter = Router();
@@ -187,7 +188,7 @@ sitesRouter.get('/:id', (req, res) => {
     )
     .all(site.id);
 
-  res.json({ site, issues, activity, messages: listMessages(site.id) });
+  res.json({ site, issues, activity, messages: listMessages(site.id), watching: isWatching(site.id, req.user.id) });
 });
 
 /** The per-domain discussion: anyone signed in can post, and reply to a post. */

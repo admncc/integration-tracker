@@ -68,12 +68,12 @@ function getTransport() {
  * development it prints the message instead, so the sign-in still works on a
  * laptop with no mail server.
  */
-export async function sendMail({ to, subject, text, html }) {
+export async function sendMail({ to, subject, text, html, headers }) {
   if (!mailConfigured()) {
     if (process.env.NODE_ENV === 'production') throw new MailNotConfigured();
     console.log(`\n--- e-mail (not sent, SMTP not configured) ---\nTo: ${to}\nSubject: ${subject}\n\n${text}\n---\n`);
     return { logged: true };
   }
-  const info = await getTransport().sendMail({ from: mailConfig().from, to, subject, text, html });
+  const info = await getTransport().sendMail({ from: mailConfig().from, to, subject, text, html, headers });
   return { messageId: info.messageId };
 }

@@ -572,6 +572,11 @@ issuesRouter.post('/:id/comments', (req, res) => {
     db.prepare('INSERT INTO comments (issue_id, author_id, body) VALUES (?, ?, ?)').run(id, req.user.id, parsed.data.body).lastInsertRowid
   );
   db.prepare(`UPDATE issues SET updated_at = ${NOW} WHERE id = ?`).run(id);
+  // Into the history too, so the domain's page shows it and its watchers hear about it.
+  logActivity({
+    siteId: issue.site_id, issueId: id, actorId: req.user.id, kind: 'comment_added',
+    newValue: parsed.data.body.length > 200 ? `${parsed.data.body.slice(0, 200)}...` : parsed.data.body,
+  });
 
   /*
    * The refreshed issue travels back with the comment. Posting one bumps

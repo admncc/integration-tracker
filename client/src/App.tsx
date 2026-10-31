@@ -1,9 +1,10 @@
-import { Link, NavLink, Navigate, Route, Routes } from 'react-router-dom';
+import { Link, NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { useSession } from './lib/session';
 import { Spinner } from './components/ui';
 import Inbox from './components/Inbox';
 import { Logo } from './components/Logo';
 import Login from './pages/Login';
+import Unsubscribe from './pages/Unsubscribe';
 import Dashboard from './pages/Dashboard';
 import SitesPage from './pages/SitesPage';
 import SiteDetail from './pages/SiteDetail';
@@ -22,7 +23,10 @@ const NAV = [
 
 export default function App() {
   const { user, loading, signOut } = useSession();
+  const location = useLocation();
 
+  // Reached from an e-mail, on whatever device it was read on: no sign-in needed.
+  if (location.pathname === '/unsubscribe') return <Unsubscribe />;
   if (loading) return <Spinner />;
   if (!user) return <Login />;
 

@@ -59,6 +59,31 @@ CREATE TABLE IF NOT EXISTS login_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_login_tokens_user ON login_tokens(user_id);
 
+-- Who gets e-mailed about changes on a site (server/lib/notify.js). A row with
+-- watching = 0 is an opt-out and is kept, so being active on the site again
+-- does not quietly sign the person back up.
+CREATE TABLE IF NOT EXISTS site_watchers (
+  site_id    INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  watching   INTEGER NOT NULL DEFAULT 1,
+  reason     TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  PRIMARY KEY (site_id, user_id)
+);
+CREATE INDEX IF NOT EXISTS idx_site_watchers_user ON site_watchers(user_id);
+
+-- Changes waiting to go out, one line each, sent in batches per person.
+CREATE TABLE IF NOT EXISTS notification_queue (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  site_id    INTEGER NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
+  line       TEXT NOT NULL,
+  link       TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_notification_queue_user ON notification_queue(user_id);
+
 CREATE TABLE IF NOT EXISTS sites (
   id                INTEGER PRIMARY KEY AUTOINCREMENT,
   domain            TEXT NOT NULL UNIQUE,
@@ -223,6 +248,9 @@ const LATE_COLUMNS = [
   ['sites', 'demand_block', "TEXT NOT NULL DEFAULT 'none'"],
   ['sites', 'demand_block_since', 'TEXT'],
   ['sites', 'demand_block_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'],
+  // Update e-mails: everything off for this person, and the key in their opt-out links.
+  ['users', 'notify_enabled', 'INTEGER NOT NULL DEFAULT 1'],
+  ['users', 'notify_token', 'TEXT'],
 ];
 
 for (const [table, column, definition] of LATE_COLUMNS) {
@@ -468,11 +496,37 @@ export function setSetting(key, value) {
 }
 
 /** Records a single field change / event on the audit trail. */
+/**
+ * Things that want to hear about every change - today the update e-mails.
+ * Registered from outside so this file does not have to know about them.
+ */
+const activityListeners = [];
+export function onActivity(listener) {
+  activityListeners.push(listener);
+}
+
 export function logActivity({ siteId = null, issueId = null, actorId = null, kind, field = null, oldValue = null, newValue = null }) {
-  db.prepare(
-    `INSERT INTO activity (site_id, issue_id, actor_id, kind, field, old_value, new_value)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(siteId, issueId, actorId, kind, field, oldValue == null ? null : String(oldValue), newValue == null ? null : String(newValue));
+  const entry = {
+    siteId, issueId, actorId, kind, field,
+    oldValue: oldValue == null ? null : String(oldValue),
+    newValue: newValue == null ? null : String(newValue),
+  };
+  entry.id = Number(
+    db
+      .prepare(
+        `INSERT INTO activity (site_id, issue_id, actor_id, kind, field, old_value, new_value)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(siteId, issueId, actorId, kind, field, entry.oldValue, entry.newValue).lastInsertRowid
+  );
+  for (const listener of activityListeners) {
+    // A notification problem must never fail the change it is about.
+    try {
+      listener(entry);
+    } catch (err) {
+      console.error(`Activity listener failed: ${err.message}`);
+    }
+  }
 }
 
 export { DB_PATH };

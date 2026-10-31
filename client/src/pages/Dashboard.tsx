@@ -297,6 +297,8 @@ function ActivityLine({ entry }: { entry: ActivityEntry }) {
       return <>attached {entry.new_value} to {issueLink ?? 'an issue'}</>;
     case 'message_posted':
       return <>wrote in the discussion: "{entry.new_value}"</>;
+    case 'comment_added':
+      return <>commented on {issueLink ?? 'an issue'}: "{entry.new_value}"</>;
     case 'message_deleted':
       return <>deleted a discussion message</>;
     case 'message_restored':
