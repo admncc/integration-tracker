@@ -512,6 +512,73 @@ sitesRouter.delete('/:id', requireRole('admin'), (req, res) => {
   res.json({ ok: true, removed_images: keys.length, removed: counts });
 });
 
+/**
+ * Deletes a selection of domains for good - the same as deleting each from its
+ * own page, in one transaction. With `dry_run` it only counts what would go,
+ * so the confirmation can say it before anything happens.
+ *
+ * POST rather than DELETE: a DELETE with a body is dropped by some proxies.
+ */
+sitesRouter.post('/bulk-delete', requireRole('admin'), (req, res) => {
+  const parsed = z
+    .object({
+      site_ids: z.array(z.coerce.number().int().positive()).min(1, 'Pick at least one domain').max(500),
+      dry_run: z.boolean().default(false),
+    })
+    .strict()
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error) });
+
+  const ids = [...new Set(parsed.data.site_ids)];
+  const placeholders = ids.map(() => '?').join(',');
+  const sites = db.prepare(`SELECT id, domain FROM sites WHERE id IN (${placeholders})`).all(...ids);
+  if (!sites.length) return res.status(404).json({ error: 'None of those domains exist' });
+
+  const perSite = sites.map((site) => {
+    const keys = db
+      .prepare('SELECT a.storage_key FROM attachments a JOIN issues i ON i.id = a.issue_id WHERE i.site_id = ?')
+      .all(site.id)
+      .map((row) => row.storage_key);
+    return {
+      ...site,
+      keys,
+      issues: db.prepare('SELECT COUNT(*) AS n FROM issues WHERE site_id = ?').get(site.id).n,
+      messages: db.prepare('SELECT COUNT(*) AS n FROM site_messages WHERE site_id = ?').get(site.id).n,
+    };
+  });
+  const totals = {
+    sites: perSite.length,
+    issues: perSite.reduce((sum, site) => sum + site.issues, 0),
+    messages: perSite.reduce((sum, site) => sum + site.messages, 0),
+    attachments: perSite.reduce((sum, site) => sum + site.keys.length, 0),
+  };
+  if (parsed.data.dry_run) return res.json({ dry_run: true, removed: totals, domains: perSite.map((site) => site.domain) });
+
+  db.exec('BEGIN');
+  try {
+    const remove = db.prepare('DELETE FROM sites WHERE id = ?');
+    for (const site of perSite) {
+      remove.run(site.id);
+      // After the delete and with no site_id, as for a single delete: this row has to outlive the site.
+      logActivity({
+        actorId: req.user.id,
+        kind: 'site_deleted',
+        field: 'domain',
+        oldValue: site.domain,
+        newValue: `${site.domain} (${site.issues} issue(s), ${site.messages} message(s), ${site.keys.length} file(s))`,
+      });
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  // Files only once the rows are certainly gone; a failed transaction must not leave issues pointing at nothing.
+  for (const site of perSite) site.keys.forEach(removeUpload);
+
+  res.json({ ok: true, removed: totals, domains: perSite.map((site) => site.domain), skipped: ids.filter((id) => !sites.some((s) => s.id === id)) });
+});
+
 /** What the column is called on screen, not what it is called in the database. */
 const FIELD_LABELS = {
   domain: 'Domain',

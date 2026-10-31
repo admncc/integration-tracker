@@ -121,6 +121,7 @@ export default function Sites() {
   const [adding, setAdding] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
 
   // Hiding the revenue columns beats rendering "N..." where "New" and "None"
@@ -254,7 +255,8 @@ export default function Sites() {
    * because it is one row; this one waits, because a sweep over forty domains
    * that half-applies is worse than one that takes a second.
    */
-  async function applyToSelection(field: string, value: string | number | null) {
+  /** Says whether it went through, so a follow-up (hiding archived rows) only runs when it did. */
+  async function applyToSelection(field: string, value: string | number | boolean | null): Promise<boolean> {
     setBulkBusy(true);
     setNotice(null);
     try {
@@ -268,14 +270,20 @@ export default function Sites() {
 
       const label =
         COLUMNS.find((column) => column.key === field)?.label ??
-        ({ owner_id: 'Responsible', demand_block: 'Demand partners', managed_by: 'Managed by' } as Record<string, string>)[field] ??
+        ({ owner_id: 'Responsible', demand_block: 'Demand partners', managed_by: 'Managed by', archived: 'Archived' } as Record<string, string>)[field] ??
         field;
-      const parts = [`${label} set on ${result.changed} domain(s)`];
+      const parts = [
+        field === 'archived'
+          ? `Archived ${result.changed} domain(s) - each can be brought back from its own page`
+          : `${label} set on ${result.changed} domain(s)`,
+      ];
       if (result.unchanged.length) parts.push(`${result.unchanged.length} already had it`);
       if (result.skipped.length) parts.push(`${result.skipped.length} skipped (archived)`);
       setNotice({ tone: 'green', text: parts.join(' · ') });
+      return true;
     } catch (err) {
       setNotice({ tone: 'red', text: err instanceof Error ? err.message : 'Could not apply the change' });
+      return false;
     } finally {
       setBulkBusy(false);
     }
@@ -549,8 +557,45 @@ export default function Sites() {
               Keep only the {selected.size - hiddenSelected} visible
             </Button>
           )}
+          {(can('manage_sites') || can('delete_site')) && (
+            <span className="ml-auto flex flex-wrap gap-2">
+              {can('manage_sites') && (
+                <Button
+                  size="sm"
+                  disabled={bulkBusy}
+                  title="Takes the domains out of the list; each can be brought back from its own page"
+                  onClick={async () => {
+                    if (!window.confirm(`Archive ${selected.size} domain(s)? They leave the list but keep everything, and can be brought back.`)) return;
+                    if (!(await applyToSelection('archived', true))) return;
+                    if (!showArchived) setSites((current) => current.filter((site) => !site.archived));
+                    setSelected(new Set());
+                  }}
+                >
+                  Archive
+                </Button>
+              )}
+              {can('delete_site') && (
+                <Button size="sm" variant="danger" onClick={() => setDeleting(true)}>
+                  Delete...
+                </Button>
+              )}
+            </span>
+          )}
           <Button size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
         </div>
+      )}
+
+      {deleting && (
+        <BulkDeleteModal
+          ids={[...selected]}
+          onClose={() => setDeleting(false)}
+          onDeleted={(domains) => {
+            setSites((current) => current.filter((site) => !selected.has(site.id)));
+            setSelected(new Set());
+            setDeleting(false);
+            setNotice({ tone: 'green', text: `Deleted ${domains.length} domain(s): ${domains.slice(0, 5).join(', ')}${domains.length > 5 ? ', ...' : ''}` });
+          }}
+        />
       )}
 
       {/*
@@ -1032,5 +1077,83 @@ function BulkEdit({
         {busy ? 'Applying...' : `Apply to ${count}`}
       </Button>
     </div>
+  );
+}
+
+interface DeletePreview {
+  removed: { sites: number; issues: number; messages: number; attachments: number };
+  domains: string[];
+}
+
+/**
+ * Deleting a selection for good. The same weight as deleting one domain from
+ * its own page: it says what goes with them first, and wants the number of
+ * domains typed - a tick too many in a list of sixty is easy to miss.
+ */
+function BulkDeleteModal({ ids, onClose, onDeleted }: { ids: number[]; onClose: () => void; onDeleted: (domains: string[]) => void }) {
+  const [preview, setPreview] = useState<DeletePreview | null>(null);
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .post<DeletePreview>('/sites/bulk-delete', { site_ids: ids, dry_run: true })
+      .then(setPreview)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not count what would be deleted'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const count = preview?.removed.sites ?? ids.length;
+  const confirmed = typed.trim() === String(count);
+
+  async function remove() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await api.post<DeletePreview>('/sites/bulk-delete', { site_ids: ids });
+      onDeleted(result.domains);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title={`Delete ${count} domain(s)?`} onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        {preview ? (
+          <>
+            <p className="text-ink-soft">
+              This permanently deletes these domains with their {preview.removed.issues} issue(s), every comment,{' '}
+              {preview.removed.attachments} attached file(s) and {preview.removed.messages} discussion message(s). It cannot be
+              undone. <span className="font-medium text-ink">Archive</span> keeps all of it and can be reversed.
+            </p>
+            <ul className="max-h-40 overflow-y-auto rounded-lg bg-raised px-3 py-2 font-mono text-xs">
+              {preview.domains.map((domain) => (
+                <li key={domain}>{domain}</li>
+              ))}
+            </ul>
+          </>
+        ) : (
+          !error && <p className="text-ink-faint">Counting what would be deleted...</p>
+        )}
+
+        <label className="block">
+          <span className="text-xs text-ink-soft">
+            Type <span className="font-mono font-medium text-ink">{count}</span> to confirm
+          </span>
+          <input className="field mt-1" inputMode="numeric" autoFocus value={typed} onChange={(event) => setTyped(event.target.value)} />
+        </label>
+
+        {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-tone-red">{error}</p>}
+
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="danger" disabled={!preview || !confirmed || busy} onClick={remove}>
+            {busy ? 'Deleting...' : `Delete ${count} domain(s) for good`}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
