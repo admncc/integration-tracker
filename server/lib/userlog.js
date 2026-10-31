@@ -75,6 +75,7 @@ const ROUTES = [
   ['POST', /^\/api\/prospects\/delete$/, (_m, b) => `deleted ${count(b?.ids)} potential sites`],
   ['POST', /^\/api\/prospects\/convert$/, (_m, b) => `converted ${count(b?.ids)} potential site(s) to integration`],
   ['POST', /^\/api\/users$/, (_m, b) => `created the account ${b?.name ?? ''} <${b?.email ?? ''}> as ${b?.role ?? ''}`],
+  ['POST', /^\/api\/users\/(\d+)\/delete$/, (m, b) => (b?.dry_run ? null : `deleted the account of ${userOf(m[1])}`)],
   ['PATCH', /^\/api\/users\/(\d+)$/, (m, b) => `changed the account of ${userOf(m[1])}: ${fieldsOf(b)}${'active' in (b ?? {}) ? (b.active ? ' (enabled)' : ' (disabled)') : ''}${b?.role ? ` -> ${b.role}` : ''}`],
   ['PATCH', /^\/api\/settings$/, (_m, b) => `changed settings: ${fieldsOf(b)}`],
   ['POST', /^\/api\/settings\/fx\/refresh$/, () => 'fetched the ECB rate'],

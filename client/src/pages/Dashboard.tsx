@@ -307,6 +307,8 @@ function ActivityLine({ entry }: { entry: ActivityEntry }) {
       return <>added the domain</>;
     case 'site_deleted':
       return <>deleted the domain {entry.new_value}</>;
+    case 'user_deleted':
+      return <>deleted the account {entry.new_value}</>;
     case 'import':
       return <>imported sites ({entry.new_value})</>;
     case 'issue_status':

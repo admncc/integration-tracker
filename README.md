@@ -156,6 +156,12 @@ hour; signing in spends both. A sign-in lasts seven days on that device.
 - An admin creates accounts with a name and an address (Settings, or
   `npm run users -- add`). Changing someone's address signs them out
   everywhere.
+- Disabling an account locks it out at once and keeps everything the person
+  did under their name. A disabled account can then be **deleted** (Settings,
+  admins only, never your own): the confirmation counts what it is attached to
+  and wants the name typed. Issues, comments, messages and history stay without
+  a name; sites they were responsible for go back to nobody and their open
+  issues become unassigned.
 
 ## Roles
 

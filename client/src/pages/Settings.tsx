@@ -21,6 +21,7 @@ export default function Settings() {
   const [users, setUsers] = useState<User[]>([]);
   const [creating, setCreating] = useState(false);
   const [editing, setEditing] = useState<User | null>(null);
+  const [deleting, setDeleting] = useState<User | null>(null);
   const [notice, setNotice] = useState('');
   /** What the dropdown shows while a change is pending or has been declined. */
   const [roleDraft, setRoleDraft] = useState<Record<number, User['role']>>({});
@@ -138,6 +139,15 @@ export default function Settings() {
                     <Button size="sm" variant={row.active ? 'danger' : 'secondary'} onClick={() => toggleActive(row)}>
                       {row.active ? 'Disable' : 'Enable'}
                     </Button>
+                    {/* Only a disabled account, never your own: deleting is a second, deliberate step. */}
+                    {!row.active && row.id !== user?.id && (
+                      <>
+                        {' '}
+                        <Button size="sm" variant="danger" onClick={() => setDeleting(row)}>
+                          Delete
+                        </Button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
@@ -177,6 +187,17 @@ export default function Settings() {
           onCreated={(created) => {
             setUsers((current) => [...current, created]);
             setCreating(false);
+          }}
+        />
+      )}
+
+      {deleting && (
+        <DeleteUserModal
+          target={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={(id) => {
+            setUsers((current) => current.filter((u) => u.id !== id));
+            setDeleting(null);
           }}
         />
       )}
@@ -244,6 +265,95 @@ function NewUserModal({ onClose, onCreated }: { onClose: () => void; onCreated: 
           <Button type="submit" variant="primary" disabled={busy}>{busy ? 'Creating...' : 'Create user'}</Button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+interface Usage {
+  issues_raised: number;
+  issues_assigned: number;
+  comments: number;
+  messages: number;
+  sites_responsible: number;
+  history_entries: number;
+}
+
+/**
+ * Deleting a disabled account for good. It says first what the person is
+ * attached to, and wants their name typed - the same weight as deleting a site.
+ */
+function DeleteUserModal({ target, onClose, onDeleted }: { target: User; onClose: () => void; onDeleted: (id: number) => void }) {
+  const [usage, setUsage] = useState<Usage | null>(null);
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .post<{ usage: Usage }>(`/users/${target.id}/delete`, { dry_run: true })
+      .then((r) => setUsage(r.usage))
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not check the account'));
+  }, [target.id]);
+
+  const confirmed = typed.trim() === target.name.trim();
+
+  async function remove() {
+    setBusy(true);
+    setError('');
+    try {
+      await api.post(`/users/${target.id}/delete`, {});
+      onDeleted(target.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete the account');
+      setBusy(false);
+    }
+  }
+
+  const lines = usage
+    ? ([
+        [usage.issues_raised, 'issue(s) raised - they stay, without a name'],
+        [usage.comments, 'comment(s) - they stay, without a name'],
+        [usage.messages, 'discussion message(s) - they stay, without a name'],
+        [usage.history_entries, 'history entries - they stay, without a name'],
+        [usage.sites_responsible, 'site(s) they are responsible for - back to nobody'],
+        [usage.issues_assigned, 'open issue(s) assigned to them - become unassigned'],
+      ] as [number, string][]).filter(([n]) => n > 0)
+    : [];
+
+  return (
+    <Modal title={`Delete ${target.name}?`} onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        <p className="text-ink-soft">
+          This deletes the account of <span className="font-medium text-ink">{target.name}</span>
+          {target.email ? ` (${target.email})` : ''} for good. It cannot be undone - a disabled account can simply stay
+          disabled instead.
+        </p>
+        {usage &&
+          (lines.length ? (
+            <ul className="space-y-0.5 rounded-lg bg-raised px-3 py-2 text-xs text-ink-soft">
+              {lines.map(([n, text]) => (
+                <li key={text}>
+                  <span className="font-semibold text-ink tabular-nums">{n}</span> {text}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="rounded-lg bg-raised px-3 py-2 text-xs text-ink-soft">The account has nothing attached to it.</p>
+          ))}
+        <label className="block">
+          <span className="text-xs text-ink-soft">
+            Type <span className="font-medium text-ink">{target.name}</span> to confirm
+          </span>
+          <input className="field mt-1" autoFocus value={typed} onChange={(e) => setTyped(e.target.value)} />
+        </label>
+        {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-tone-red">{error}</p>}
+        <div className="flex justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="danger" disabled={!usage || !confirmed || busy} onClick={remove}>
+            {busy ? 'Deleting...' : 'Delete account for good'}
+          </Button>
+        </div>
+      </div>
     </Modal>
   );
 }

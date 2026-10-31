@@ -442,6 +442,44 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
 });
 
 /**
+ * Deleting an account for good. Only one that is disabled already - so an
+ * active colleague cannot be removed with a single mistaken click - and never
+ * your own. With `dry_run` it only counts what the account is attached to, so
+ * the confirmation can say it first.
+ *
+ * Nothing the person wrote is deleted with them: issues, comments, messages
+ * and history stay, without a name. Sites they were responsible for go back to
+ * nobody, issues assigned to them to unassigned. Their sessions, open sign-in
+ * e-mails and update subscriptions go with the account.
+ */
+metaRouter.post('/users/:id/delete', requireRole('admin'), (req, res) => {
+  const id = Number(req.params.id);
+  const parsed = z.object({ dry_run: z.boolean().default(false) }).strict().safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json({ error: 'dry_run must be true or false' });
+
+  const user = db.prepare('SELECT id, name, email, role, active FROM users WHERE id = ?').get(id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  if (id === req.user.id) return res.status(400).json({ error: 'You cannot delete your own account' });
+  if (user.active) return res.status(409).json({ error: 'Disable the account first - only a disabled account can be deleted' });
+
+  const n = (sql) => db.prepare(sql).get(id).n;
+  const usage = {
+    issues_raised: n('SELECT COUNT(*) AS n FROM issues WHERE reporter_id = ?'),
+    issues_assigned: n("SELECT COUNT(*) AS n FROM issues WHERE assignee_id = ? AND deleted_at IS NULL AND status NOT IN ('verified', 'wont_fix')"),
+    comments: n('SELECT COUNT(*) AS n FROM comments WHERE author_id = ?'),
+    messages: n('SELECT COUNT(*) AS n FROM site_messages WHERE author_id = ?'),
+    sites_responsible: n('SELECT COUNT(*) AS n FROM sites WHERE owner_id = ?'),
+    history_entries: n('SELECT COUNT(*) AS n FROM activity WHERE actor_id = ?'),
+  };
+  if (parsed.data.dry_run) return res.json({ dry_run: true, user: { id: user.id, name: user.name, email: user.email }, usage });
+
+  // Foreign keys do the rest: SET NULL on everything the person wrote, CASCADE on sessions and subscriptions.
+  db.prepare('DELETE FROM users WHERE id = ?').run(id);
+  logActivity({ actorId: req.user.id, kind: 'user_deleted', oldValue: user.email, newValue: `${user.name} <${user.email ?? ''}>` });
+  res.json({ ok: true, deleted: { id: user.id, name: user.name }, usage });
+});
+
+/**
  * The admin's log: who is online, when each person last signed in, and the
  * last seven days of sign-ins and actions.
  */
