@@ -144,9 +144,15 @@ hour; signing in spends both. A sign-in lasts seven days on that device.
 - The link opens the sign-in page and signs in on a click, not on opening: mail
   filters open every link in a message before the recipient does.
 - The code is for signing in on a different device than the one reading mail.
-- The page says the same whether or not the address has an account. Five wrong
-  codes spend that person's open codes; one address gets at most five e-mails
-  an hour; one connection is slowed down after repeated failures.
+- The page says the same whether or not the address has an account, and says
+  it before any e-mail is sent, so the answer time gives nothing away either.
+- **Three failed sign-ins from one connection lock it out for 24 hours** - a
+  wrong code, or a link that was never sent (an old link that has expired does
+  not count). The block survives a restart. An admin lifts it in Settings ->
+  Blocked connections, or on the server with `npm run users -- unblock <ip>`.
+  Everybody behind the same address - a whole office - shares the count.
+- Five wrong codes spend that person's open codes; one address gets at most
+  five e-mails an hour; one connection can ask for at most 20 in 15 minutes.
 - An admin creates accounts with a name and an address (Settings, or
   `npm run users -- add`). Changing someone's address signs them out
   everywhere.

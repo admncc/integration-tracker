@@ -381,6 +381,7 @@ the database is on the new schema. Restore the backup as well.
 | "Sign-in by e-mail is not set up on this server yet" | `SMTP_HOST` or `MAIL_FROM` missing from `.env`, or the service was not restarted after adding them |
 | The sign-in e-mail never arrives | Settings → Sign-in e-mails → test e-mail, then `sudo journalctl -u postfix -n 50`. "Connection timed out" to port 25: the hoster blocks it. "550 ... SPF/DKIM": the DNS records or the PTR are missing. Also check the person's spam folder, and that their address in Settings is spelt right |
 | Locked out, mail is down | `sudo -u tracker -H npm run users -- login-link <you>` prints a one-time link and code |
+| "Signing in from this connection is blocked until ..." | Three failed sign-ins from that address in 24 hours. Settings -> Blocked connections -> Lift, or `sudo -u tracker -H npm run users -- unblock <ip>` (`blocks` lists them). If it hits everybody at once, `TRUST_PROXY=1` is missing and every visitor looks like nginx |
 | The link in the e-mail points to the wrong place | `PUBLIC_URL` in `.env` |
 | The link says "expired or was already used" on first click | The company mail filter opened it first - that is why the page asks for a click instead of signing in on opening. If it still happens, type the code |
 | `fatal: detected dubious ownership` on `git pull` | You are root in a directory owned by `tracker`. Use `sudo -u tracker -H git pull`. Do not add a `safe.directory` exception: running git as root here leaves root-owned files behind, and the service cannot write them |

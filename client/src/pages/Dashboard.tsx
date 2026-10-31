@@ -322,6 +322,7 @@ function ActivityLine({ entry }: { entry: ActivityEntry }) {
       return <>deleted {domains(countIn(entry.new_value))} from Potential Sites</>;
     case 'setting_changed': {
       const label = SETTING_LABELS[entry.field ?? ''] ?? 'a setting';
+      if (entry.field === 'ip_block') return <>{entry.new_value?.replace(/^lifted /, 'lifted the sign-in block on ')}</>;
       // The webhook URL is a secret of sorts; the feed says that it changed, not what to.
       if (entry.field === 'digest_webhook_url') return <>{entry.new_value === 'test sent' ? 'sent a test digest' : `changed ${label}`}</>;
       return <>set {label} to {entry.new_value}</>;

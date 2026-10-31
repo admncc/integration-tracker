@@ -155,6 +155,8 @@ export default function Settings() {
 
       <MailPanel />
 
+      <BlocksPanel />
+
       <DigestPanel />
 
       <section className="card p-4">
@@ -291,6 +293,74 @@ function EditUserModal({ target, onClose, onSaved }: { target: User; onClose: ()
         </div>
       </form>
     </Modal>
+  );
+}
+
+interface Block {
+  ip: string;
+  blocked_at: string;
+  until: string;
+  failures: number;
+}
+
+/**
+ * Connections locked out of signing in after repeated failures. A whole office
+ * behind one address shares the count, so this is where a colleague who mistyped
+ * a code three times gets let back in.
+ */
+function BlocksPanel() {
+  const [data, setData] = useState<{ blocks: Block[]; max_failures: number; block_hours: number } | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api.get<{ blocks: Block[]; max_failures: number; block_hours: number }>('/settings/blocks').then(setData).catch(() => setData(null));
+  }, []);
+
+  async function lift(ip: string) {
+    if (!window.confirm(`Let ${ip === 'all' ? 'every blocked connection' : ip} sign in again?`)) return;
+    setError('');
+    try {
+      const r = await api.post<{ blocks: Block[] }>('/settings/blocks/unblock', { ip });
+      setData((current) => (current ? { ...current, blocks: r.blocks } : current));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not lift the block');
+    }
+  }
+
+  if (!data) return null;
+  return (
+    <section className="card p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <h2 className="text-sm font-semibold">Blocked connections</h2>
+        {data.blocks.length > 1 && (
+          <Button size="sm" className="ml-auto" onClick={() => lift('all')}>
+            Lift all
+          </Button>
+        )}
+      </div>
+      <p className="mt-1 mb-3 max-w-3xl text-xs text-ink-soft">
+        {data.max_failures} failed sign-ins - a wrong code, or a link that was never sent - lock that connection out for{' '}
+        {data.block_hours} hours. Everybody behind the same address, a whole office for instance, is locked out with it.
+      </p>
+      {error && <p className="mb-2 rounded-lg bg-tone-red-bg px-3 py-2 text-sm text-tone-red">{error}</p>}
+      {data.blocks.length === 0 ? (
+        <p className="text-sm text-ink-faint">None right now.</p>
+      ) : (
+        <ul className="divide-y divide-line text-sm">
+          {data.blocks.map((block) => (
+            <li key={block.ip} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
+              <span className="font-mono text-xs">{block.ip}</span>
+              <span className="text-xs text-ink-soft">
+                {block.failures} failures · blocked {formatDateTime(block.blocked_at)} · until {formatDateTime(block.until)}
+              </span>
+              <Button size="sm" className="ml-auto" onClick={() => lift(block.ip)}>
+                Lift
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }
 

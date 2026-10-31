@@ -4,6 +4,7 @@ import { db, getSetting, logActivity, setSetting } from '../lib/db.js';
 import { requireAuth, requireRole, usernameFor } from '../lib/auth.js';
 import { mailConfig, mailConfigured, sendMail } from '../lib/mail.js';
 import { publicUrl } from '../lib/login.js';
+import { BLOCK_HOURS, MAX_FAILURES, listBlocks, unblock } from '../lib/lockout.js';
 import { APPROVAL, CMP, DEFAULT_EUR_USD, DEMAND_BLOCK, FX_SETTING_KEY, OPEN_ISSUE_STATUSES, TRACKS, TRACK_STATUS } from '../../shared/domain.js';
 import { FX_KEYS, fxState, refreshRate } from '../lib/fx.js';
 import { DIGEST_KEYS, buildDigest, digestPayload, digestState, isQuiet, sendDigest } from '../lib/digest.js';
@@ -437,6 +438,19 @@ metaRouter.patch('/users/:id', requireRole('admin'), (req, res) => {
     db.prepare('DELETE FROM login_tokens WHERE user_id = ?').run(id);
   }
   res.json({ user: db.prepare(`SELECT ${USER_COLUMNS} FROM users WHERE id = ?`).get(id) });
+});
+
+/** Connections locked out of signing in after too many failed attempts. */
+metaRouter.get('/settings/blocks', requireRole('admin'), (_req, res) => {
+  res.json({ blocks: listBlocks(), max_failures: MAX_FAILURES, block_hours: BLOCK_HOURS });
+});
+
+metaRouter.post('/settings/blocks/unblock', requireRole('admin'), (req, res) => {
+  const parsed = z.object({ ip: z.string().trim().min(1).max(100) }).strict().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Name the address' });
+  const lifted = unblock(parsed.data.ip);
+  logActivity({ actorId: req.user.id, kind: 'setting_changed', field: 'ip_block', newValue: `lifted ${parsed.data.ip}` });
+  res.json({ lifted, blocks: listBlocks() });
 });
 
 /** Whether the server can send the sign-in e-mails, for Settings. */

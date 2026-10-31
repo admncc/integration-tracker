@@ -87,3 +87,29 @@ test('without a public address the e-mail has only the code', () => {
   assert.doesNotMatch(mail.text, /https?:/);
   assert.match(mail.text, /123 456/);
 });
+
+test('three failures from one address block it for a day; a success clears the count', async () => {
+  const lockout = await import('../server/lib/lockout.js');
+  assert.equal(lockout.recordFailure('192.0.2.1', 'code'), null);
+  assert.equal(lockout.recordFailure('192.0.2.1', 'code'), null);
+  const block = lockout.recordFailure('192.0.2.1', 'link');
+  assert.ok(block);
+  const hours = (new Date(block.until) - Date.now()) / 3600e3;
+  assert.ok(hours > 23.9 && hours <= 24);
+  assert.ok(lockout.activeBlock('192.0.2.1'));
+  assert.equal(lockout.activeBlock('192.0.2.2'), null);
+
+  lockout.recordFailure('192.0.2.3', 'code');
+  lockout.recordFailure('192.0.2.3', 'code');
+  lockout.clearFailures('192.0.2.3');
+  assert.equal(lockout.recordFailure('192.0.2.3', 'code'), null);
+
+  assert.equal(lockout.unblock('192.0.2.1'), 1);
+  assert.equal(lockout.activeBlock('192.0.2.1'), null);
+});
+
+test('the client address is read the same with or without the IPv4-in-IPv6 prefix', async () => {
+  const { clientIp } = await import('../server/lib/lockout.js');
+  assert.equal(clientIp({ ip: '::ffff:203.0.113.9' }), '203.0.113.9');
+  assert.equal(clientIp({ ip: '2001:db8::1' }), '2001:db8::1');
+});

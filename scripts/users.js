@@ -14,6 +14,11 @@
  *   npm run users -- set-email admin you@example.com
  *       The account by username, address or name.
  *
+ *   npm run users -- blocks
+ *   npm run users -- unblock 203.0.113.7      (or: unblock all)
+ *       Connections locked out after three failed sign-ins. The way back in
+ *       for an admin who locked themselves out.
+ *
  *   npm run users -- login-link admin
  *       Prints a sign-in link and code (one use, one hour) without sending
  *       anything. For the admin when mail is not working yet. Whoever can run
@@ -24,6 +29,7 @@ import '../server/lib/env.js';
 const { db } = await import('../server/lib/db.js');
 const { issueLoginToken, signInLink, TOKEN_MINUTES } = await import('../server/lib/login.js');
 const { usernameFor } = await import('../server/lib/auth.js');
+const lockout = await import('../server/lib/lockout.js');
 
 const [command, ...rest] = process.argv.slice(2);
 const flags = new Map();
@@ -176,7 +182,20 @@ function loginLink() {
   if (account.email) console.log(`  or on the sign-in page: e-mail ${account.email}, code ${code}\n`);
 }
 
-const COMMANDS = { list, add, 'set-email': setEmail, 'login-link': loginLink };
+function blocks() {
+  const rows = lockout.listBlocks();
+  if (!rows.length) return console.log('No connection is blocked.');
+  for (const row of rows) console.log(`  ${row.ip.padEnd(40)} blocked ${row.blocked_at} until ${row.until} (${row.failures} failures)`);
+}
+
+function unblockCommand() {
+  const [ip] = positional;
+  if (!ip) fail('npm run users -- unblock <ip>   (or: unblock all)');
+  const lifted = lockout.unblock(ip);
+  console.log(lifted ? `Lifted ${lifted} block(s).` : `${ip} was not blocked; its failed attempts are cleared anyway.`);
+}
+
+const COMMANDS = { list, add, 'set-email': setEmail, 'login-link': loginLink, blocks, unblock: unblockCommand };
 if (!COMMANDS[command]) {
   console.error(`npm run users -- <${Object.keys(COMMANDS).join('|')}>  (details at the top of scripts/users.js)`);
   process.exit(1);

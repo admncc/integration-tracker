@@ -28,8 +28,12 @@ const codeHash = (userId, code) => sha256(`${userId}:${code}`);
 const now = () => new Date().toISOString();
 
 export function issueLoginToken(userId, { ip = null } = {}) {
-  // Old rows only make the table grow; a day is plenty to look into a complaint.
-  db.prepare("DELETE FROM login_tokens WHERE created_at < datetime('now', '-1 day')").run();
+  /*
+   * Old rows only make the table grow. Thirty days, not one: a spent link has
+   * to stay recognisable, so that somebody clicking last week's e-mail is told
+   * it expired instead of being counted as guessing (lockout.js).
+   */
+  db.prepare("DELETE FROM login_tokens WHERE created_at < datetime('now', '-30 days')").run();
 
   const token = randomBytes(32).toString('base64url');
   const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
@@ -57,6 +61,12 @@ export function mailsLastHour(userId) {
 /** Signing in once spends every link and code that person still had. */
 function consumeAll(userId) {
   db.prepare('UPDATE login_tokens SET used_at = ? WHERE user_id = ? AND used_at IS NULL').run(now(), userId);
+}
+
+/** Whether a link token was ever issued - spent or expired included. */
+export function linkWasIssued(token) {
+  if (typeof token !== 'string' || token.length < 20) return false;
+  return Boolean(db.prepare('SELECT 1 FROM login_tokens WHERE token_hash = ?').get(sha256(token)));
 }
 
 /** The link: returns the user id it signs in, or null. */

@@ -59,6 +59,23 @@ CREATE TABLE IF NOT EXISTS login_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_login_tokens_user ON login_tokens(user_id);
 
+-- Failed sign-ins per connection, and the connections that are locked out
+-- because of them (server/lib/lockout.js). In the database so a restart does
+-- not hand an attacker a fresh set of tries.
+CREATE TABLE IF NOT EXISTS login_failures (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  ip         TEXT NOT NULL,
+  kind       TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_login_failures_ip ON login_failures(ip, created_at);
+CREATE TABLE IF NOT EXISTS ip_blocks (
+  ip         TEXT PRIMARY KEY,
+  blocked_at TEXT NOT NULL DEFAULT (datetime('now')),
+  until      TEXT NOT NULL,
+  failures   INTEGER NOT NULL DEFAULT 0
+);
+
 -- Who gets e-mailed about changes on a site (server/lib/notify.js). A row with
 -- watching = 0 is an opt-out and is kept, so being active on the site again
 -- does not quietly sign the person back up.

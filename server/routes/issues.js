@@ -263,7 +263,9 @@ issuesRouter.get('/export.csv', (req, res) => {
   ]);
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="issues-${req.query.status ?? 'open'}.csv"`);
+  // The filter value goes into a header: letters and underscores only, so a crafted one cannot reshape it.
+  const named = String(req.query.status ?? 'open').replace(/[^a-z_]/gi, '').slice(0, 30) || 'open';
+  res.setHeader('Content-Disposition', `attachment; filename="issues-${named}.csv"`);
   res.send(toCsv([header, ...body]));
 });
 

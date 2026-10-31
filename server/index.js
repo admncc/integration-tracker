@@ -32,7 +32,11 @@ if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PRO
  * deliberately narrow: everything the SPA needs is same-origin, and images may
  * come from data: URIs for the file previews in the upload dialog.
  */
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
+  // Over HTTPS only: telling a browser to insist on TLS from a plain-HTTP answer is ignored anyway.
+  if (req.secure) res.setHeader('Strict-Transport-Security', 'max-age=31536000');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
@@ -63,11 +67,17 @@ app.use(attachUser);
  * outage. The write goes to a temporary table, so it costs nothing and leaves
  * nothing behind.
  */
+let lastProbeWrite = 0;
 app.get('/api/health', (_req, res) => {
   try {
     // A real write to the real database file, which is what a full disk stops.
     // One settings row, rewritten - it is the cheapest honest probe there is.
-    setSetting('health_probe_at', new Date().toISOString());
+    // At most every ten seconds: the route is open to anyone, and must not be
+    // a way to make the server write as fast as it is asked to.
+    if (Date.now() - lastProbeWrite > 10_000) {
+      setSetting('health_probe_at', new Date().toISOString());
+      lastProbeWrite = Date.now();
+    }
     const sites = db.prepare('SELECT COUNT(*) AS n FROM sites').get().n;
     res.json({ ok: true, sites });
   } catch (err) {
