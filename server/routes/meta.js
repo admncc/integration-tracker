@@ -4,7 +4,7 @@ import { db, getSetting, logActivity, setSetting } from '../lib/db.js';
 import { requireAuth, requireRole, usernameFor } from '../lib/auth.js';
 import { mailConfig, mailConfigured, sendMail } from '../lib/mail.js';
 import { publicUrl } from '../lib/login.js';
-import { APPROVAL, CMP, DEFAULT_EUR_USD, FX_SETTING_KEY, OPEN_ISSUE_STATUSES, TRACKS, TRACK_STATUS } from '../../shared/domain.js';
+import { APPROVAL, CMP, DEFAULT_EUR_USD, DEMAND_BLOCK, FX_SETTING_KEY, OPEN_ISSUE_STATUSES, TRACKS, TRACK_STATUS } from '../../shared/domain.js';
 import { FX_KEYS, fxState, refreshRate } from '../lib/fx.js';
 import { DIGEST_KEYS, buildDigest, digestPayload, digestState, isQuiet, sendDigest } from '../lib/digest.js';
 import { csvToSites, toCsv } from '../lib/sheet.js';
@@ -148,6 +148,26 @@ metaRouter.get('/inbox', (req, res) => {
   const seen = db.prepare('SELECT inbox_seen_message_id FROM users WHERE id = ?').get(req.user.id)?.inbox_seen_message_id ?? 0;
 
   const items = [];
+
+  /*
+   * A site the demand partners mostly refuse is losing money every hour it
+   * stays up, so on the publisher side it goes first. The partner raised it;
+   * there is nothing more for them to do.
+   */
+  if (req.user.role !== 'partner') {
+    const flagged = db
+      .prepare("SELECT COUNT(*) AS n FROM sites WHERE archived = 0 AND demand_block = 'mostly_blocked'")
+      .get().n;
+    if (flagged) {
+      items.push({
+        key: 'demand_blocked',
+        n: flagged,
+        label: flagged === 1 ? '1 site mostly blocked - take it offline' : `${flagged} sites mostly blocked - take them offline`,
+        to: '/sites?blocked=1',
+        alert: true,
+      });
+    }
+  }
 
   /*
    * Work on your own desk, whoever you work for. The partner has their own
@@ -454,7 +474,7 @@ metaRouter.get('/export.csv', (_req, res) => {
     'PRIO', 'Domain', 'STATUS (video)', 'STATUS (display)', 'TEST URL', 'Ads.txt (ManagerDomain)',
     'STATUS (ads.txt & ad tag)', 'MCM', 'CMP', 'Demand partner approval',
     'Previous Session RPM', 'Previous RPM currency', 'Primis Session RPM', 'Primis RPM currency',
-    'Responsible', 'Managed by', 'Open issues', 'Latest message',
+    'Responsible', 'Managed by', 'Open issues', 'Latest message', 'Demand partners',
   ];
   const latestMessage = new Map(
     db
@@ -487,6 +507,7 @@ metaRouter.get('/export.csv', (_req, res) => {
     label(CMP, s.cmp), label(APPROVAL, s.approval),
     s.rpm_previous ?? '', s.rpm_previous_currency, s.rpm_primis ?? '', s.rpm_primis_currency,
     s.owner_name ?? '', s.managed_by, openCounts.get(s.id) ?? 0, latestMessage.get(s.id) ?? '',
+    s.demand_block === 'none' ? '' : label(DEMAND_BLOCK, s.demand_block),
   ]);
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');

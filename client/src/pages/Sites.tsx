@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Site, TrackStatus, User } from '../lib/types';
-import { APPROVAL, CMP, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
+import { APPROVAL, CMP, DEMAND_BLOCK, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
+import { DemandFlagButton, flaggedBy } from '../components/DemandFlag';
 import { Badge, Button, CurrencyToggle, Empty, Field, InlineSelect, InlineText, Modal, Spinner, type Tone } from '../components/ui';
 import IssueModal from '../components/IssueModal';
 import NetworkIssues from '../components/NetworkIssues';
@@ -114,7 +115,8 @@ export default function Sites() {
   const [filters, setFilters] = useState<FilterMap>({});
   const [sort, setSort] = useState<SortState>({ key: 'priority', dir: 1 });
   const [showArchived, setShowArchived] = useState(false);
-  const [readiness, setReadiness] = useState<'all' | 'live' | 'incomplete' | 'inactive'>('all');
+  /** The traffic-light chips, plus the two demand-partner flags, which filter the same way. */
+  const [readiness, setReadiness] = useState<'all' | 'live' | 'incomplete' | 'inactive' | 'mostly_blocked' | 'offline'>('all');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
@@ -167,6 +169,12 @@ export default function Sites() {
     // Everyone who can hold a domain - both companies, active accounts only.
     api.get<{ users: User[] }>('/users').then((r) => setUsers(r.users.filter((u) => u.active !== 0))).catch(() => setUsers([]));
   }, []);
+
+  /* `/sites?blocked=1` is where the inbox and the digest send the publisher. */
+  const blockedParam = params.get('blocked');
+  useEffect(() => {
+    if (blockedParam === '1') setReadiness('mostly_blocked');
+  }, [blockedParam]);
 
   /* `/sites?owner=3` is where the header's "N domains of yours" lands. */
   const ownerParam = params.get('owner');
@@ -258,7 +266,10 @@ export default function Sites() {
       const bySite = new Map(result.sites.map((site) => [site.id, site]));
       setSites((current) => current.map((site) => bySite.get(site.id) ?? site));
 
-      const label = COLUMNS.find((column) => column.key === field)?.label ?? field;
+      const label =
+        COLUMNS.find((column) => column.key === field)?.label ??
+        ({ owner_id: 'Responsible', demand_block: 'Demand partners', managed_by: 'Managed by' } as Record<string, string>)[field] ??
+        field;
       const parts = [`${label} set on ${result.changed} domain(s)`];
       if (result.unchanged.length) parts.push(`${result.unchanged.length} already had it`);
       if (result.skipped.length) parts.push(`${result.skipped.length} skipped (archived)`);
@@ -274,7 +285,9 @@ export default function Sites() {
     const term = search.trim().toLowerCase();
     const rows = sites.filter((site) => {
       if (term && !`${site.domain} ${site.managed_by}`.toLowerCase().includes(term)) return false;
-      if (readiness !== 'all' && siteReadiness(site) !== readiness) return false;
+      if (readiness === 'mostly_blocked' || readiness === 'offline') {
+        if (site.demand_block !== readiness) return false;
+      } else if (readiness !== 'all' && siteReadiness(site) !== readiness) return false;
 
       return Object.entries(filters).every(([key, value]) => {
         if (!value) return true;
@@ -344,10 +357,16 @@ export default function Sites() {
   const activeFilters = Object.values(filters).filter(Boolean).length + (search ? 1 : 0) + (readiness === 'all' ? 0 : 1);
 
   const readinessCounts = useMemo(() => {
-    const counts = { live: 0, incomplete: 0, inactive: 0 };
-    for (const site of sites) counts[siteReadiness(site)] += 1;
+    const counts = { live: 0, incomplete: 0, inactive: 0, mostly_blocked: 0, offline: 0 };
+    for (const site of sites) {
+      counts[siteReadiness(site)] += 1;
+      if (site.demand_block === 'mostly_blocked' || site.demand_block === 'offline') counts[site.demand_block] += 1;
+    }
     return counts;
   }, [sites]);
+
+  /** Still up while the demand side refuses them - what the alert banner lists. */
+  const flagged = useMemo(() => sites.filter((site) => site.demand_block === 'mostly_blocked' && !site.archived), [sites]);
 
   function toggleSort(key: string) {
     setSort((current) => (current.key === key ? { key, dir: current.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
@@ -449,7 +468,55 @@ export default function Sites() {
             {label}
           </button>
         ))}
+        {(
+          [
+            ['mostly_blocked', `Mostly blocked by demand partners (${readinessCounts.mostly_blocked})`],
+            ['offline', `Taken offline (${readinessCounts.offline})`],
+          ] as const
+        )
+          // The offline record only earns a chip once there is one.
+          .filter(([key]) => key === 'mostly_blocked' || readinessCounts[key] > 0)
+          .map(([key, label]) => (
+            <button
+              key={key}
+              onClick={() => setReadiness(readiness === key ? 'all' : key)}
+              aria-pressed={readiness === key}
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition ${
+                readiness === key
+                  ? 'border-brand bg-brand-soft text-brand-ink'
+                  : key === 'mostly_blocked' && readinessCounts.mostly_blocked > 0
+                    ? 'border-tone-red/40 bg-tone-red-bg font-medium text-tone-red hover:brightness-95'
+                    : 'border-line text-ink-soft hover:bg-raised'
+              }`}
+            >
+              <span aria-hidden className={`size-2 rounded-sm ${key === 'mostly_blocked' ? 'bg-tone-red' : 'bg-tone-slate'}`} />
+              {label}
+            </button>
+          ))}
       </div>
+
+      {flagged.length > 0 && (
+        <div role="alert" className="rounded-xl border border-tone-red/40 bg-tone-red-bg px-4 py-3 text-sm text-tone-red">
+          <div className="font-semibold">
+            ⚠ {flagged.length === 1 ? '1 site is' : `${flagged.length} sites are`} mostly blocked by demand partners
+          </div>
+          <ul className="mt-1 space-y-0.5">
+            {flagged.map((site) => (
+              <li key={site.id}>
+                <Link to={`/sites/${site.id}`} className="font-medium underline-offset-2 hover:underline">
+                  {site.domain}
+                </Link>{' '}
+                <span className="text-xs opacity-80">{flaggedBy(site)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-1.5 text-xs opacity-80">
+            {can('manage_sites')
+              ? `Take ${flagged.length === 1 ? 'it' : 'them'} offline, then mark ${flagged.length === 1 ? 'it' : 'each one'} "Taken offline" with the flag - that ends the alert.`
+              : `The publisher has been alerted to take ${flagged.length === 1 ? 'it' : 'them'} offline.`}
+          </p>
+        </div>
+      )}
 
       {notice && (
         <div className={`rounded-lg px-3 py-2 text-sm ${notice.tone === 'red' ? 'bg-tone-red-bg text-tone-red' : 'bg-tone-green-bg text-tone-green'}`}>
@@ -467,6 +534,7 @@ export default function Sites() {
             count={selected.size}
             disabled={(field) => readOnly(field)}
             users={users}
+            canTakeOffline={can('manage_sites')}
             busy={bulkBusy}
             onApply={applyToSelection}
           />
@@ -530,13 +598,16 @@ export default function Sites() {
             {visible.map((site) => (
               <tr
                 key={site.id}
-                className={`border-b border-line last:border-0 hover:bg-raised/60 ${
-                  (site.open_issues ?? 0) > 0 ? 'bg-tone-red-bg/25' : ''
-                } ${siteReadiness(site) === 'inactive' ? 'opacity-55' : ''} ${
+                className={`border-b border-line last:border-0 ${
+                  site.demand_block === 'mostly_blocked'
+                    ? 'bg-tone-red-bg hover:brightness-[0.98]'
+                    : `hover:bg-raised/60 ${(site.open_issues ?? 0) > 0 ? 'bg-tone-red-bg/25' : ''}`
+                } ${siteReadiness(site) === 'inactive' || site.demand_block === 'offline' ? 'opacity-55' : ''} ${
                   site.archived ? 'bg-tone-slate-bg/40 italic' : ''
                 }`}
               >
-                <td className="px-2 py-1.5">
+                {/* The red bar on the left is the alarm; it reads even when the row is scrolled sideways. */}
+                <td className={`px-2 py-1.5 ${site.demand_block === 'mostly_blocked' ? 'shadow-[inset_4px_0_0_var(--color-tone-red)]' : ''}`}>
                   <input type="checkbox" aria-label={`Select ${site.domain}`} checked={selected.has(site.id)} onChange={() => toggleRow(site.id)} />
                 </td>
 
@@ -704,23 +775,27 @@ function Cell({
           : `not live yet: ${missing.join(', ')}`;
     const title = `${site.domain} - ${state}`;
 
+    const blocked = site.demand_block === 'mostly_blocked';
     return (
-      <Link
-        to={`/sites/${site.id}`}
-        className={`group flex items-center gap-1.5 font-medium hover:text-brand ${
-          readiness === 'inactive' ? 'text-ink-faint' : ''
-        }`}
-        title={title}
-      >
-        <span aria-hidden className={`size-2 shrink-0 rounded-full ${READINESS[readiness].dot}`} />
-        {Boolean(site.archived) && (
-          <span className="shrink-0 rounded bg-tone-slate-bg px-1 text-[10px] font-medium text-tone-slate not-italic">
-            archived
-          </span>
-        )}
-        <span className="sr-only">{READINESS[readiness].label}. </span>
-        <span className="truncate group-hover:underline">{site.domain}</span>
-      </Link>
+      <div className="flex items-center gap-1">
+        <Link
+          to={`/sites/${site.id}`}
+          className={`group flex min-w-0 flex-1 items-center gap-1.5 font-medium hover:text-brand ${
+            blocked ? 'text-tone-red' : readiness === 'inactive' ? 'text-ink-faint' : ''
+          } ${site.demand_block === 'offline' ? 'line-through' : ''}`}
+          title={blocked ? `${site.domain} - mostly blocked by demand partners ${flaggedBy(site)}` : site.demand_block === 'offline' ? `${site.domain} - taken offline` : title}
+        >
+          <span aria-hidden className={`size-2 shrink-0 rounded-full ${READINESS[readiness].dot}`} />
+          {Boolean(site.archived) && (
+            <span className="shrink-0 rounded bg-tone-slate-bg px-1 text-[10px] font-medium text-tone-slate not-italic">
+              archived
+            </span>
+          )}
+          <span className="sr-only">{READINESS[readiness].label}. </span>
+          <span className="truncate group-hover:underline">{site.domain}</span>
+        </Link>
+        <DemandFlagButton site={site} disabled={disabled || Boolean(site.archived)} onSet={(next) => onCommit('demand_block', next)} />
+      </div>
     );
   }
 
@@ -856,9 +931,11 @@ function BulkEdit({
   disabled,
   users,
   busy,
+  canTakeOffline,
   onApply,
 }: {
   count: number;
+  canTakeOffline: boolean;
   /** The same read-only rules the table cells use, so a partner sees only theirs. */
   disabled: (field: string) => boolean;
   users: User[];
@@ -884,10 +961,18 @@ function BulkEdit({
             })),
           ],
         },
+        {
+          key: 'demand_block',
+          label: 'Demand partners',
+          // "Taken offline" is the publisher's to say; it is what ends the alert.
+          options: (Object.entries(DEMAND_BLOCK) as [string, { label: string }][])
+            .filter(([value]) => value !== 'offline' || canTakeOffline)
+            .map(([value, meta]) => ({ value, label: meta.label })),
+        },
         { key: 'priority', label: 'Priority', options: null },
         { key: 'managed_by', label: 'Managed by', options: null },
       ].filter((field) => !disabled(field.key)),
-    [disabled, users]
+    [disabled, users, canTakeOffline]
   );
 
   const [field, setField] = useState(fields[0]?.key ?? '');

@@ -14,6 +14,7 @@ export interface User {
 
 export type TrackStatus = 'live' | 'qa' | 'tag_impl' | 'tag_prep' | 'pending' | 'na';
 export type CmpValue = 'none' | 'old' | 'new';
+export type DemandBlock = 'none' | 'mostly_blocked' | 'offline';
 export type ApprovalValue = 'none' | 'sent' | 'approved' | 'rejected';
 export type IssueStatus = 'open' | 'in_progress' | 'blocked' | 'ready_for_qa' | 'verified' | 'wont_fix';
 export type Severity = 'blocker' | 'high' | 'medium' | 'low';
@@ -40,6 +41,9 @@ export interface Site {
   /** Who is answerable for this domain. Null means nobody has taken it on. */
   owner_id: number | null;
   owner_name?: string | null;
+  demand_block: DemandBlock;
+  demand_block_since?: string | null;
+  demand_block_by_name?: string | null;
   owner_company?: string | null;
   owner_role?: Role | null;
   notes: string;
@@ -108,6 +112,8 @@ export interface InboxItem {
   n: number;
   label: string;
   to: string;
+  /** Needs acting on now, not just looking at. */
+  alert?: boolean;
 }
 
 export interface Inbox {

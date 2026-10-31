@@ -3,12 +3,13 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { ActivityEntry, Issue, Site, SiteMessage, User } from '../lib/types';
-import { APPROVAL, CMP, CURRENCIES, ISSUE_STATUS, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteCompletion, siteReadiness } from '@shared/domain.js';
+import { APPROVAL, CMP, CURRENCIES, DEMAND_BLOCK, ISSUE_STATUS, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteCompletion, siteReadiness } from '@shared/domain.js';
 import { Badge, Button, Empty, InlineSelect, InlineText, Modal, Spinner, Timestamp, type Tone } from '../components/ui';
 import IssueCard from '../components/IssueCard';
 import IssueModal from '../components/IssueModal';
 import { parseDecimal } from './Sites';
 import SiteChat from '../components/SiteChat';
+import { DemandBlockPanel } from '../components/DemandFlag';
 
 const STATUS_OPTIONS = Object.entries(TRACK_STATUS).map(([value, meta]) => ({ value, label: meta.label }));
 const CMP_OPTIONS = Object.entries(CMP).map(([value, meta]) => ({ value, label: meta.label }));
@@ -139,6 +140,12 @@ export default function SiteDetail() {
           <Button variant="primary" onClick={() => setComposing(true)}>+ New issue</Button>
         </div>
       </div>
+
+      <DemandBlockPanel
+        site={site}
+        disabled={readOnly('demand_block') || Boolean(site.archived)}
+        onSet={(value) => patchSite('demand_block', value)}
+      />
 
       <TestUrlBar url={site.test_url} disabled={readOnly('test_url')} onSave={(value) => patchSite('test_url', value)} />
 
@@ -656,6 +663,7 @@ const VALUE_MAPS: Record<string, Record<string, { label: string }>> = {
   cmp: CMP,
   approval: APPROVAL,
   status: ISSUE_STATUS,
+  demand_block: DEMAND_BLOCK,
 };
 
 /** Column headings as they read on screen. */
@@ -676,6 +684,7 @@ const FIELD_LABELS: Record<string, string> = {
   rpm_primis_currency: 'the Primis RPM currency',
   managed_by: 'Managed by',
   owner_id: 'who is responsible',
+  demand_block: 'the demand-partner flag',
   archived: 'the archived flag',
 };
 

@@ -4,7 +4,7 @@ import { db, logActivity } from '../lib/db.js';
 import { requireAuth, requireRole } from '../lib/auth.js';
 import { removeUpload } from '../lib/uploads.js';
 import { normaliseDomain } from '../lib/sheet.js';
-import { APPROVAL, CMP, CURRENCIES, OPEN_ISSUE_STATUSES, TRACK_STATUS } from '../../shared/domain.js';
+import { APPROVAL, CMP, CURRENCIES, DEMAND_BLOCK, OPEN_ISSUE_STATUSES, TRACK_STATUS } from '../../shared/domain.js';
 
 export const sitesRouter = Router();
 sitesRouter.use(requireAuth);
@@ -57,6 +57,8 @@ const siteFields = {
    * "nobody has picked this up yet" is a real and visible state, not an error.
    */
   owner_id: z.union([z.null(), z.coerce.number().int().positive()]),
+  // Flagged by the partner when the demand side mostly refuses the traffic.
+  demand_block: z.enum(Object.keys(DEMAND_BLOCK)),
   /*
    * A real boolean, not a coerced one. z.coerce.boolean() turns "false" and
    * "0" into true, so the call meant to bring a site back archived it instead.
@@ -89,6 +91,26 @@ const updateSchema = z.object(siteFields).partial().strict();
  */
 const PARTNER_FORBIDDEN = new Set(['archived']);
 
+/**
+ * What the partner may not do to a site. Besides archiving: declaring a site
+ * taken offline. Flagging it as mostly blocked is theirs - they see the demand
+ * side - but whether it has actually been taken down is the publisher's to say,
+ * and saying it is what clears the alert.
+ */
+function partnerRefusal(changes) {
+  const forbidden = Object.keys(changes).filter((field) => PARTNER_FORBIDDEN.has(field));
+  if (forbidden.length) return `The partner side cannot change: ${forbidden.join(', ')}`;
+  if (changes.demand_block === 'offline') return 'Only the publisher can mark a site as taken offline';
+  return null;
+}
+
+/** Who flagged or cleared a site and when, kept next to the flag itself. */
+const stampDemandBlock = db.prepare(
+  `UPDATE sites SET demand_block_since = CASE WHEN demand_block = 'none' THEN NULL ELSE datetime('now') END,
+                    demand_block_by = CASE WHEN demand_block = 'none' THEN NULL ELSE ? END
+    WHERE id = ?`
+);
+
 export const importRowSchema = z
   .object({ ...siteFields, notes: z.string().trim().max(20000) })
   .partial()
@@ -109,6 +131,7 @@ function listSites({ includeArchived = false } = {}) {
   return db
     .prepare(
       `SELECT s.*, o.name AS owner_name, o.company AS owner_company, o.role AS owner_role,
+              b.name AS demand_block_by_name,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status IN (${openList})) AS open_issues,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status = 'ready_for_qa') AS awaiting_qa,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status = 'blocked') AS blocked_issues,
@@ -116,6 +139,7 @@ function listSites({ includeArchived = false } = {}) {
               (SELECT COUNT(*) FROM site_messages m WHERE m.site_id = s.id AND m.deleted_at IS NULL) AS message_count
          FROM sites s
          LEFT JOIN users o ON o.id = s.owner_id
+         LEFT JOIN users b ON b.id = s.demand_block_by
         WHERE (? = 1 OR s.archived = 0)
         ORDER BY s.priority ASC, s.domain ASC`
     )
@@ -129,8 +153,10 @@ sitesRouter.get('/', (req, res) => {
 sitesRouter.get('/:id', (req, res) => {
   const site = db
     .prepare(
-      `SELECT s.*, o.name AS owner_name, o.company AS owner_company, o.role AS owner_role
-         FROM sites s LEFT JOIN users o ON o.id = s.owner_id WHERE s.id = ?`
+      `SELECT s.*, o.name AS owner_name, o.company AS owner_company, o.role AS owner_role,
+              b.name AS demand_block_by_name
+         FROM sites s LEFT JOIN users o ON o.id = s.owner_id LEFT JOIN users b ON b.id = s.demand_block_by
+        WHERE s.id = ?`
     )
     .get(Number(req.params.id));
   if (!site) return res.status(404).json({ error: 'Site not found' });
@@ -358,10 +384,8 @@ sitesRouter.patch('/bulk', requireRole('admin', 'dev', 'partner'), (req, res) =>
   }
 
   if (req.user.role === 'partner') {
-    const forbidden = fields.map(([field]) => field).filter((field) => PARTNER_FORBIDDEN.has(field));
-    if (forbidden.length) {
-      return res.status(403).json({ error: `The partner side cannot change: ${forbidden.join(', ')}` });
-    }
+    const refusal = partnerRefusal(parsed.data.changes);
+    if (refusal) return res.status(403).json({ error: refusal });
   }
 
   const ids = [...new Set(parsed.data.site_ids)];
@@ -390,6 +414,7 @@ sitesRouter.patch('/bulk', requireRole('admin', 'dev', 'partner'), (req, res) =>
       }
 
       update.run(...values, site.id);
+      if (differs.some(([field]) => field === 'demand_block')) stampDemandBlock.run(req.user.id, site.id);
       changed += 1;
       for (const [field, value] of differs) {
         logActivity({ siteId: site.id, actorId: req.user.id, kind: 'site_updated', field, oldValue: site[field], newValue: normalise(value) });
@@ -429,12 +454,10 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
   }
 
   if (req.user.role === 'partner') {
-    const forbidden = Object.keys(parsed.data).filter((field) => PARTNER_FORBIDDEN.has(field));
-    if (forbidden.length) {
-      // Dropping these quietly and answering 200 told an API caller a write had
-      // happened when it had not.
-      return res.status(403).json({ error: `The partner side cannot change: ${forbidden.join(', ')}` });
-    }
+    // Dropping these quietly and answering 200 told an API caller a write had
+    // happened when it had not.
+    const refusal = partnerRefusal(parsed.data);
+    if (refusal) return res.status(403).json({ error: refusal });
   }
 
   const updates = Object.entries(parsed.data).filter(([field, value]) => normalise(value) !== site[field]);
@@ -443,6 +466,7 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
   db.prepare(
     `UPDATE sites SET ${updates.map(([f]) => `${f} = ?`).join(', ')}, updated_at = datetime('now') WHERE id = ?`
   ).run(...updates.map(([, v]) => normalise(v)), id);
+  if (updates.some(([field]) => field === 'demand_block')) stampDemandBlock.run(req.user.id, id);
 
   for (const [field, value] of updates) {
     logActivity({ siteId: id, actorId: req.user.id, kind: 'site_updated', field, oldValue: site[field], newValue: normalise(value) });

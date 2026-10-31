@@ -82,8 +82,19 @@ export function buildDigest() {
     )
     .get().n;
 
+  // Sites the demand partners mostly refuse, still up: the first thing to act on.
+  const demandBlocked = db
+    .prepare(
+      `SELECT s.domain, s.demand_block_since, u.name AS flagged_by FROM sites s
+         LEFT JOIN users u ON u.id = s.demand_block_by
+        WHERE s.archived = 0 AND s.demand_block = 'mostly_blocked'
+        ORDER BY s.demand_block_since ASC`
+    )
+    .all();
+
   return {
     raised, handed_back: handedBack, verified, messages,
+    demand_blocked: demandBlocked.map((row) => ({ ...row, waiting: formatWaiting(row.demand_block_since) })),
     waiting_on_partner: waitingOnPartner, waiting_on_dev: waitingOnDev, unassigned,
     open_total: openTotal,
     blocked: blocked.map((row) => ({
@@ -101,7 +112,8 @@ export function isQuiet(digest) {
     digest.verified === 0 &&
     digest.messages === 0 &&
     digest.waiting_on_partner === 0 &&
-    digest.waiting_on_dev === 0
+    digest.waiting_on_dev === 0 &&
+    digest.demand_blocked.length === 0
   );
 }
 
@@ -112,6 +124,13 @@ export function isQuiet(digest) {
 export function digestPayload(digest, baseUrl = '') {
   const link = (path, label) => (baseUrl ? `<${baseUrl}${path}|${label}>` : label);
   const lines = [`*Integration Tracker - last 24 hours*`];
+
+  if (digest.demand_blocked?.length) {
+    lines.push(`:rotating_light: ${link('/sites?blocked=1', 'Mostly blocked by demand partners - take offline')}:`);
+    for (const site of digest.demand_blocked) {
+      lines.push(`  • ${site.domain}${site.flagged_by ? ` - flagged by ${site.flagged_by}` : ''} ${site.waiting}`.trimEnd());
+    }
+  }
 
   const moved = [];
   if (digest.raised) moved.push(`${digest.raised} raised`);

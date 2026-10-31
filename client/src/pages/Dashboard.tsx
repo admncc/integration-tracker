@@ -335,6 +335,11 @@ function ActivityLine({ entry }: { entry: ActivityEntry }) {
     default: {
       const field = entry.field ?? '';
       if (field === 'owner_id') return <>made {entry.new_person ?? 'nobody'} responsible</>;
+      if (field === 'demand_block') {
+        if (entry.new_value === 'mostly_blocked') return <span className="font-medium text-tone-red">flagged as mostly blocked by demand partners</span>;
+        if (entry.new_value === 'offline') return <>took the site offline (mostly blocked by demand partners)</>;
+        return <>cleared the demand-partner flag</>;
+      }
       const label = FIELD_LABELS[field] ?? field;
       const value = TRACK_FIELDS.has(field)
         ? (TRACK_STATUS[entry.new_value as keyof typeof TRACK_STATUS]?.label ?? entry.new_value)

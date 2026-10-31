@@ -104,9 +104,11 @@ export default function Inbox() {
                         api.post('/inbox/seen').then(() => setData((current) => (current ? { ...current, items: current.items.filter((i) => i.key !== 'messages'), total: current.total - item.n } : current))).catch(() => {});
                       }
                     }}
-                    className="flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition hover:bg-raised"
+                    className={`flex items-center gap-2 rounded-lg px-2 py-2 text-sm transition ${
+                      item.alert ? 'bg-tone-red-bg font-medium text-tone-red hover:brightness-95' : 'hover:bg-raised'
+                    }`}
                   >
-                    <span className="min-w-0 flex-1">{item.label}</span>
+                    <span className="min-w-0 flex-1">{item.alert && <span aria-hidden>⚠ </span>}{item.label}</span>
                     <Badge tone={item.key === 'unassigned' ? 'amber' : 'red'}>{item.n}</Badge>
                   </Link>
                 </li>

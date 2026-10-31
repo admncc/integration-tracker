@@ -36,6 +36,17 @@ export const APPROVAL = {
 };
 
 /**
+ * The demand partners' verdict on a live site. Primis flags a domain whose
+ * traffic the demand side mostly refuses; the publisher then takes it offline
+ * and says so. "none" is the normal state.
+ */
+export const DEMAND_BLOCK = {
+  none:           { label: 'Not flagged',                       short: '-',              tone: 'muted' },
+  mostly_blocked: { label: 'Mostly blocked by demand partners', short: 'Mostly blocked', tone: 'red'   },
+  offline:        { label: 'Taken offline',                     short: 'Offline',        tone: 'slate' },
+};
+
+/**
  * QA loop: the partner opens an issue, a dev picks it up and pushes a fix,
  * the partner re-checks. `verified` and `wont_fix` are terminal.
  *

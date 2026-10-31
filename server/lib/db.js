@@ -219,6 +219,10 @@ const LATE_COLUMNS = [
   ['prospects', 'high_potential', 'INTEGER NOT NULL DEFAULT 0'],
   // When the person last signed in, for the people list in Settings.
   ['users', 'last_login_at', 'TEXT'],
+  // The demand partners' verdict on a site (shared/domain.js DEMAND_BLOCK), who said so and when.
+  ['sites', 'demand_block', "TEXT NOT NULL DEFAULT 'none'"],
+  ['sites', 'demand_block_since', 'TEXT'],
+  ['sites', 'demand_block_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'],
 ];
 
 for (const [table, column, definition] of LATE_COLUMNS) {
