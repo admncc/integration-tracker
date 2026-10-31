@@ -197,11 +197,13 @@ prospectsRouter.post('/convert', (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Pick at least one domain' });
 
   const unique = [...new Set(parsed.data.ids)];
-  const rows = db.prepare(`SELECT id, domain FROM prospects WHERE id IN (${unique.map(() => '?').join(',')})`).all(...unique);
+  const rows = db.prepare(`SELECT id, domain, project_status FROM prospects WHERE id IN (${unique.map(() => '?').join(',')})`).all(...unique);
   if (!rows.length) return res.status(404).json({ error: 'None of those domains are on the list' });
 
   const converted = [];
   const alreadyTracked = [];
+  // A candidate marked FAILED was looked at and did not work out; it does not start an integration.
+  const failed = [];
   const createSite = db.prepare(
     `INSERT INTO sites (domain, priority, status_video, status_display, status_ads_txt, status_ad_tag, status_mcm, cmp, approval)
      VALUES (?, 1, 'pending', 'pending', 'pending', 'pending', 'pending', 'none', 'none')`
@@ -210,6 +212,10 @@ prospectsRouter.post('/convert', (req, res) => {
   db.exec('BEGIN');
   try {
     for (const row of rows) {
+      if (row.project_status === 'failed') {
+        failed.push(row.domain);
+        continue;
+      }
       if (db.prepare('SELECT 1 FROM sites WHERE domain = ?').get(row.domain)) {
         alreadyTracked.push(row.domain);
         continue;
@@ -224,7 +230,10 @@ prospectsRouter.post('/convert', (req, res) => {
     throw err;
   }
 
-  res.status(converted.length ? 201 : 200).json({ converted, already_tracked: alreadyTracked, prospects: listProspects() });
+  if (!converted.length && !alreadyTracked.length && failed.length) {
+    return res.status(409).json({ error: `${failed.length === 1 ? failed[0] : `All ${failed.length}`} marked FAILED - set the project status back to NEW to convert`, failed });
+  }
+  res.status(converted.length ? 201 : 200).json({ converted, already_tracked: alreadyTracked, failed, prospects: listProspects() });
 });
 
 /**

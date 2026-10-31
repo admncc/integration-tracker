@@ -161,7 +161,7 @@ export default function Prospects() {
     setBusy(true);
     setNotice(null);
     try {
-      const r = await api.post<{ converted: { site_id: number; domain: string }[]; already_tracked: string[]; prospects: Prospect[] }>(
+      const r = await api.post<{ converted: { site_id: number; domain: string }[]; already_tracked: string[]; failed: string[]; prospects: Prospect[] }>(
         '/prospects/convert',
         { ids }
       );
@@ -169,6 +169,7 @@ export default function Prospects() {
       setSelected(new Set());
       const parts = [`${r.converted.length} moved into the integration process at priority 1`];
       if (r.already_tracked.length) parts.push(`${r.already_tracked.length} already there`);
+      if (r.failed.length) parts.push(`${r.failed.length} skipped - marked FAILED`);
       setNotice({ tone: 'green', text: parts.join(' · ') });
     } catch (err) {
       setNotice({ tone: 'red', text: err instanceof Error ? err.message : 'Could not convert' });
@@ -427,16 +428,26 @@ export default function Prospects() {
                       </Link>
                     ) : (
                       canConvert && (
-                        <Button
-                          size="sm"
-                          variant="primary"
-                          disabled={busy}
-                          className="shadow-sm"
-                          title={`Add ${prospect.domain} to "Sites in integration process" at priority 1, every track Pending`}
-                          onClick={() => convert([prospect.id])}
+                        // The hint sits on a wrapper: a disabled button shows no tooltip in some browsers.
+                        <span
+                          className="inline-block"
+                          title={
+                            prospect.project_status === 'failed'
+                              ? 'Project status is FAILED - set it back to NEW to convert'
+                              : `Add ${prospect.domain} to "Sites in integration process" at priority 1, every track Pending`
+                          }
                         >
-                          Convert to Integration
-                        </Button>
+                          <Button
+                            size="sm"
+                            variant="primary"
+                            // FAILED: looked at and did not work out. Back to NEW makes it convertible again.
+                            disabled={busy || prospect.project_status === 'failed'}
+                            className="shadow-sm disabled:!bg-line-strong disabled:!text-ink-faint disabled:!opacity-100 disabled:shadow-none"
+                            onClick={() => convert([prospect.id])}
+                          >
+                            Convert to Integration
+                          </Button>
+                        </span>
                       )
                     )}
                   </td>
