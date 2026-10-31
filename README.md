@@ -16,7 +16,7 @@ Built for the Primis rollout, but nothing in it is Primis-specific.
 
 ## What it does
 
-**Potential projects** - the first tab under Sites: candidate domains before
+**Potential Sites** - the first tab under Sites: candidate domains before
 any of them becomes a project. Paste a list or load a .txt file (one domain per
 line; commas, spaces and full URLs work too). Each domain carries two statuses
 that move independently - a **project status** (NEW, LIVE, REMOVED) and a
@@ -29,7 +29,13 @@ domain was looked at; "Delete from list" is for a paste that went wrong. The
 list is kept apart from the sites table on purpose, so a batch of candidates
 never reaches the rollout numbers, the dashboard or anybody's "waiting on you".
 
-**Sites** - one row per domain, with the five tracks from the old sheet (video,
+**Convert to Integration** - the highlighted button at the end of each row, or
+for a whole selection. It adds the domain to **Sites in integration process**
+at priority 1 with every track on Pending, and sets its project status to LIVE;
+the row stays on the list as the record, with a link to the new site. Starting
+an integration is the publisher's call, as adding a domain by hand is.
+
+**Sites in integration process** - one row per domain, with the five tracks from the old sheet (video,
 display, ads.txt, ad tag, MCM) plus CMP and partner approval. Every cell is
 editable in place, every column filterable and sortable. Domains can be added,
 archived (reversible, from the domain's own page) or deleted permanently.

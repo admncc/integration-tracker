@@ -394,7 +394,7 @@ export default function Sites() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h1 className="text-lg font-semibold">Sites</h1>
+          <h1 className="text-lg font-semibold">Sites in integration process</h1>
           <p className="text-sm text-ink-soft">
             {visible.length} of {sites.length} sites{activeFilters > 0 && ' · filtered'}
           </p>
@@ -603,7 +603,7 @@ export default function Sites() {
        * without the track selects turning into bare chevrons, so on a tablet or
        * a phone the table keeps that width and scrolls inside its card.
        */}
-      <div className="card overflow-x-auto">
+      <div className="card relative overflow-x-auto">
         <table className="w-full min-w-[980px] table-fixed border-collapse text-sm">
           <thead>
             <tr className="border-b border-line bg-raised">

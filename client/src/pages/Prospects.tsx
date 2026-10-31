@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import type { DomainStatus, ProjectStatus, Prospect, ProspectImport } from '../lib/types';
 import { DOMAIN_STATUS, PROJECT_STATUS } from '@shared/domain.js';
 import { Button, Empty, InlineSelect, Modal, Spinner, type Tone } from '../components/ui';
+import { useSession } from '../lib/session';
 
 type StatusMap = Record<string, { label: string; tone: string }>;
 
@@ -41,7 +42,7 @@ const FIELDS = [
 type FieldKey = (typeof FIELDS)[number]['key'];
 
 /**
- * Potential projects: candidate domains and where each one stands.
+ * Potential Sites: candidate domains and where each one stands.
  *
  * Two questions, kept apart because they move independently: where the project
  * stands with us (new, live, removed) and how the domain itself came out of the
@@ -58,6 +59,9 @@ export default function Prospects() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [importing, setImporting] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { can } = useSession();
+  // Starting an integration adds a domain to the sites table - the publisher's call, as adding one by hand is.
+  const canConvert = can('manage_sites');
   const [bulkField, setBulkField] = useState<FieldKey>('project_status');
   const [bulkValue, setBulkValue] = useState<string>('removed');
 
@@ -149,6 +153,30 @@ export default function Prospects() {
     }
   }
 
+  /** "Convert to Integration": into the sites table at priority 1, every track Pending. */
+  async function convert(ids: number[]) {
+    const names = prospects.filter((p) => ids.includes(p.id)).map((p) => p.domain);
+    const what = names.length === 1 ? names[0] : `${names.length} domains`;
+    if (!window.confirm(`Start the integration of ${what}?\n\nIt is added to "Sites in integration process" at priority 1, with every track on Pending.`)) return;
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await api.post<{ converted: { site_id: number; domain: string }[]; already_tracked: string[]; prospects: Prospect[] }>(
+        '/prospects/convert',
+        { ids }
+      );
+      setProspects(r.prospects);
+      setSelected(new Set());
+      const parts = [`${r.converted.length} moved into the integration process at priority 1`];
+      if (r.already_tracked.length) parts.push(`${r.already_tracked.length} already there`);
+      setNotice({ tone: 'green', text: parts.join(' · ') });
+    } catch (err) {
+      setNotice({ tone: 'red', text: err instanceof Error ? err.message : 'Could not convert' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function deleteSelected() {
     const ids = [...selected];
     if (!window.confirm(`Delete ${ids.length} domain(s) from the list for good?\n\nA project status of REMOVED keeps the record instead.`)) return;
@@ -174,7 +202,7 @@ export default function Prospects() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-3">
         <div>
-          <h1 className="text-lg font-semibold">Potential projects</h1>
+          <h1 className="text-lg font-semibold">Potential Sites</h1>
           <p className="text-sm text-ink-soft">
             {visible.length} of {prospects.length} domain(s)
           </p>
@@ -286,6 +314,11 @@ export default function Prospects() {
               Unmark
             </Button>
           </div>
+          {canConvert && (
+            <Button size="sm" variant="primary" disabled={busy} onClick={() => convert([...selected])}>
+              Convert {selected.size} to Integration
+            </Button>
+          )}
           <Button size="sm" variant="danger" disabled={busy} onClick={deleteSelected}>
             Delete from list
           </Button>
@@ -297,13 +330,15 @@ export default function Prospects() {
 
       {prospects.length === 0 ? (
         <Empty>
-          No potential projects yet. Use <span className="font-medium">+ Add domains</span> to paste a list or upload a .txt file.
+          No potential sites yet. Use <span className="font-medium">+ Add domains</span> to paste a list or upload a .txt file.
         </Empty>
       ) : (
         // The domain-status labels are long; on a phone the table scrolls
         // inside its card rather than pushing the whole page sideways.
-        <div className="card overflow-x-auto">
-          <table className="w-full min-w-[760px] table-fixed border-collapse text-sm">
+        // `relative` keeps the screen-reader-only header labels (absolutely
+        // positioned) inside that card - without it they widened the page.
+        <div className="card relative overflow-x-auto">
+          <table className="w-full min-w-[960px] table-fixed border-collapse text-sm">
             <thead>
               <tr className="border-b border-line bg-raised text-left">
                 <th className="w-10 px-3 py-2">
@@ -321,6 +356,9 @@ export default function Prospects() {
                 <th className="px-3 py-2 font-medium text-ink-soft">Domain</th>
                 <th className="w-40 px-3 py-2 font-medium text-ink-soft">Project status</th>
                 <th className="w-72 px-3 py-2 font-medium text-ink-soft">Domain status</th>
+                <th className="w-52 px-3 py-2 font-medium text-ink-soft">
+                  <span className="sr-only">Integration</span>
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -366,11 +404,6 @@ export default function Prospects() {
                     >
                       {prospect.domain}
                     </span>
-                    {prospect.site_id != null && (
-                      <Link to={`/sites/${prospect.site_id}`} className="ml-2 text-xs text-brand hover:underline">
-                        now a tracked site
-                      </Link>
-                    )}
                   </td>
                   {FIELDS.map((field) => (
                     <td key={field.key} className="px-3 py-1.5">
@@ -384,11 +417,34 @@ export default function Prospects() {
                       />
                     </td>
                   ))}
+                  <td className="px-3 py-1.5 text-right">
+                    {prospect.site_id != null ? (
+                      <Link
+                        to={`/sites/${prospect.site_id}`}
+                        className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-2 py-1 text-xs font-medium text-tone-green hover:bg-tone-green-bg"
+                      >
+                        ✓ In integration →
+                      </Link>
+                    ) : (
+                      canConvert && (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          disabled={busy}
+                          className="shadow-sm"
+                          title={`Add ${prospect.domain} to "Sites in integration process" at priority 1, every track Pending`}
+                          onClick={() => convert([prospect.id])}
+                        >
+                          Convert to Integration
+                        </Button>
+                      )
+                    )}
+                  </td>
                 </tr>
               ))}
               {visible.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="px-3 py-6 text-center text-sm text-ink-faint">
+                  <td colSpan={6} className="px-3 py-6 text-center text-sm text-ink-faint">
                     No domain matches these filters.
                   </td>
                 </tr>
@@ -464,7 +520,7 @@ function ImportModal({ onClose, onImported }: { onClose: () => void; onImported:
   }
 
   return (
-    <Modal title="Add potential projects" onClose={onClose} wide>
+    <Modal title="Add potential sites" onClose={onClose} wide>
       <form onSubmit={submit} className="space-y-3">
         <p className="text-sm text-ink-soft">
           Paste domains, one per line, or load a .txt file. Full URLs work too - only the domain is kept. Duplicates and

@@ -266,7 +266,7 @@ const SETTING_LABELS: Record<string, string> = {
   digest_hour: 'the daily digest time',
 };
 
-/** "6 potential project(s) added" -> 6, for a sentence that reads properly. */
+/** "6 potential site(s) added" -> 6, for a sentence that reads properly. */
 const countIn = (value: string | null) => Number.parseInt(value ?? '', 10) || 0;
 const domains = (n: number) => `${n} domain${n === 1 ? '' : 's'}`;
 
@@ -317,9 +317,9 @@ function ActivityLine({ entry }: { entry: ActivityEntry }) {
         </>
       );
     case 'prospects_imported':
-      return <>added {domains(countIn(entry.new_value))} to <Link to="/sites?view=potentials" className="text-ink hover:text-brand hover:underline">Potential projects</Link></>;
+      return <>added {domains(countIn(entry.new_value))} to <Link to="/sites?view=potentials" className="text-ink hover:text-brand hover:underline">Potential Sites</Link></>;
     case 'prospects_deleted':
-      return <>deleted {domains(countIn(entry.new_value))} from Potential projects</>;
+      return <>deleted {domains(countIn(entry.new_value))} from Potential Sites</>;
     case 'setting_changed': {
       const label = SETTING_LABELS[entry.field ?? ''] ?? 'a setting';
       // The webhook URL is a secret of sorts; the feed says that it changed, not what to.

@@ -12,8 +12,8 @@ import Sites from './Sites';
  * because those carry no `view` at all.
  */
 const TABS = [
-  { key: 'potentials', label: 'Potential projects' },
-  { key: 'sites', label: 'Sites' },
+  { key: 'potentials', label: 'Potential Sites' },
+  { key: 'sites', label: 'Sites in integration process' },
 ] as const;
 
 export default function SitesPage() {

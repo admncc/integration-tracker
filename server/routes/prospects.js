@@ -6,7 +6,7 @@ import { normaliseDomain } from '../lib/sheet.js';
 import { DOMAIN_STATUS, PROJECT_STATUS } from '../../shared/domain.js';
 
 /**
- * Potential projects: candidate domains with a project status and a domain
+ * Potential Sites: candidate domains with a project status and a domain
  * status, nothing more.
  *
  * It is deliberately not the sites table. A pasted batch of a few hundred
@@ -115,7 +115,7 @@ prospectsRouter.post('/import', (req, res) => {
   }
 
   if (added.length) {
-    logActivity({ actorId: req.user.id, kind: 'prospects_imported', newValue: `${added.length} potential project(s) added` });
+    logActivity({ actorId: req.user.id, kind: 'prospects_imported', newValue: `${added.length} potential site(s) added` });
   }
 
   res.status(added.length ? 201 : 200).json({
@@ -182,6 +182,55 @@ prospectsRouter.patch('/bulk', (req, res) => {
 });
 
 /**
+ * "Convert to Integration": the candidate becomes a site in the integration
+ * process - priority 1, every track Pending, CMP and approval at their
+ * starting values. The candidate stays on this list, its project status set to
+ * LIVE and linked to the new site, as the record of where it came from.
+ *
+ * The same people who can add a domain to the sites table can do this.
+ */
+prospectsRouter.post('/convert', (req, res) => {
+  if (!['admin', 'dev'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Only the publisher side can start an integration' });
+  }
+  const parsed = z.object({ ids }).strict().safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Pick at least one domain' });
+
+  const unique = [...new Set(parsed.data.ids)];
+  const rows = db.prepare(`SELECT id, domain FROM prospects WHERE id IN (${unique.map(() => '?').join(',')})`).all(...unique);
+  if (!rows.length) return res.status(404).json({ error: 'None of those domains are on the list' });
+
+  const converted = [];
+  const alreadyTracked = [];
+  const createSite = db.prepare(
+    `INSERT INTO sites (domain, priority, status_video, status_display, status_ads_txt, status_ad_tag, status_mcm, cmp, approval)
+     VALUES (?, 1, 'pending', 'pending', 'pending', 'pending', 'pending', 'none', 'none')`
+  );
+  const markLive = db.prepare("UPDATE prospects SET project_status = 'live', updated_at = datetime('now') WHERE id = ?");
+
+  db.exec('BEGIN');
+  try {
+    for (const row of rows) {
+      if (db.prepare('SELECT 1 FROM sites WHERE domain = ?').get(row.domain)) {
+        alreadyTracked.push(row.domain);
+        markLive.run(row.id);
+        continue;
+      }
+      const siteId = Number(createSite.run(row.domain).lastInsertRowid);
+      markLive.run(row.id);
+      logActivity({ siteId, actorId: req.user.id, kind: 'site_created', newValue: `${row.domain} (from Potential Sites)` });
+      converted.push({ prospect_id: row.id, site_id: siteId, domain: row.domain });
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+
+  res.status(converted.length ? 201 : 200).json({ converted, already_tracked: alreadyTracked, prospects: listProspects() });
+});
+
+/**
  * Takes rows off the list for good. A project status of REMOVED keeps the
  * record that a domain was looked at and turned down; this is for a paste that
  * went wrong.
@@ -197,7 +246,7 @@ prospectsRouter.post('/delete', (req, res) => {
     .run(...unique).changes;
 
   if (deleted) {
-    logActivity({ actorId: req.user.id, kind: 'prospects_deleted', newValue: `${deleted} potential project(s) deleted` });
+    logActivity({ actorId: req.user.id, kind: 'prospects_deleted', newValue: `${deleted} potential site(s) deleted` });
   }
   res.json({ deleted, prospects: listProspects() });
 });
