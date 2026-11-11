@@ -21,8 +21,11 @@ any of them becomes a project. Paste a list or load a .txt file (one domain per
 line; commas, spaces and full URLs work too). Each domain carries two statuses
 that move independently - a **project status** (NEW, FAILED) and a
 **domain status** (NEW, DOMAIN SUBMITTED FOR APPROVAL, GOOD, MOSTLY BLOCKED) -
-changed per row or across a selection. A star marks **high potential**: those
-rows are highlighted and always listed first, whatever was pasted after them.
+changed per row or across a selection. A **star in one of five colours** gives
+a candidate a priority - red is priority 1, the highest, then orange, yellow,
+green and blue for 5. Starred rows are tinted in their colour and always listed
+first, highest priority on top, whatever was pasted after them. The legend above
+the table names the colours and doubles as a filter.
 Repeats, domains already on the list and domains that are already tracked sites
 are skipped and reported. A project status of FAILED keeps the record that a
 domain was looked at and did not work out; "Delete from list" is for a paste that went wrong. The

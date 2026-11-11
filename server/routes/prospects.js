@@ -28,14 +28,14 @@ const ids = z.array(z.coerce.number().int().positive()).min(1, 'Pick at least on
 function listProspects() {
   return db
     .prepare(
-      `SELECT p.id, p.domain, p.project_status, p.domain_status, p.high_potential, p.created_at, p.updated_at,
+      `SELECT p.id, p.domain, p.project_status, p.domain_status, p.high_potential, p.star, p.created_at, p.updated_at,
               u.name AS added_by_name,
               (SELECT s.id FROM sites s WHERE s.domain = p.domain) AS site_id
          FROM prospects p
          LEFT JOIN users u ON u.id = p.added_by
-        -- High-potential projects first, so the ones worth chasing are never
-        -- buried under the latest paste.
-        ORDER BY p.high_potential DESC, p.id DESC`
+        -- Starred candidates first, priority 1 on top, so the ones worth chasing
+        -- are never buried under the latest paste.
+        ORDER BY CASE WHEN p.star BETWEEN 1 AND 5 THEN p.star ELSE 9 END, p.id DESC`
     )
     .all();
 }
@@ -139,18 +139,22 @@ prospectsRouter.patch('/bulk', (req, res) => {
       ids,
       project_status: projectStatus.optional(),
       domain_status: domainStatus.optional(),
+      // 1 (highest) to 5, or 0 for no star.
+      star: z.number({ invalid_type_error: 'star must be a number from 0 to 5' }).int().min(0).max(5).optional(),
+      // The earlier on/off switch, still understood: true is priority 1, false no star.
       // A real boolean: z.coerce.boolean() would read "false" as true.
       high_potential: z.boolean({ invalid_type_error: 'high_potential must be true or false' }).optional(),
     })
     .strict()
     .refine(
-      (body) => body.project_status || body.domain_status || body.high_potential !== undefined,
+      (body) => body.project_status || body.domain_status || body.star !== undefined || body.high_potential !== undefined,
       'Pick something to set'
     )
     .safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: parsed.error.issues[0]?.message ?? 'Pick a status' });
 
-  const { project_status: project, domain_status: domain, high_potential: highPotential } = parsed.data;
+  const { project_status: project, domain_status: domain } = parsed.data;
+  const star = parsed.data.star ?? (parsed.data.high_potential === undefined ? undefined : parsed.data.high_potential ? 1 : 0);
   const fields = [];
   const values = [];
   const differs = [];
@@ -164,10 +168,11 @@ prospectsRouter.patch('/bulk', (req, res) => {
     values.push(domain);
     differs.push('domain_status != ?');
   }
-  if (highPotential !== undefined) {
-    fields.push('high_potential = ?');
-    values.push(highPotential ? 1 : 0);
-    differs.push('high_potential != ?');
+  if (star !== undefined) {
+    // high_potential follows the star, for anything still reading it.
+    fields.push('star = ?', 'high_potential = ?');
+    values.push(star, star > 0 ? 1 : 0);
+    differs.push('star != ?', 'high_potential != ?');
   }
 
   const unique = [...new Set(parsed.data.ids)];

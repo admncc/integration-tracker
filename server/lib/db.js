@@ -274,6 +274,8 @@ const LATE_COLUMNS = [
   ['prospects', 'project_status', "TEXT NOT NULL DEFAULT 'new'"],
   ['prospects', 'domain_status', "TEXT NOT NULL DEFAULT 'new'"],
   ['prospects', 'high_potential', 'INTEGER NOT NULL DEFAULT 0'],
+  // The star became five colours: 1 the highest priority, 0 none (shared/domain.js STAR_LEVELS).
+  ['prospects', 'star', 'INTEGER NOT NULL DEFAULT 0'],
   // When the person last signed in, for the people list in Settings.
   ['users', 'last_login_at', 'TEXT'],
   // The demand partners' verdict on a site (shared/domain.js DEMAND_BLOCK), who said so and when.
@@ -464,6 +466,11 @@ db.exec(`
   UPDATE prospects SET project_status = 'failed' WHERE project_status = 'removed';
   UPDATE prospects SET project_status = 'new' WHERE project_status = 'live';
 `);
+// A candidate starred before there were levels was a top pick: it keeps its place as priority 1.
+if (!getSetting('prospect_star_levels')) {
+  db.exec('UPDATE prospects SET star = 1 WHERE high_potential = 1 AND star = 0');
+  setSetting('prospect_star_levels', '1');
+}
 db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_project ON prospects(project_status)');
 db.exec('CREATE INDEX IF NOT EXISTS idx_prospects_domain ON prospects(domain_status)');
 

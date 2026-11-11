@@ -237,6 +237,18 @@ export const PROJECT_STATUS = {
   failed: { label: 'FAILED', tone: 'red'  },
 };
 
+/**
+ * Star priority on Potential Sites: five colours, 1 the highest. 0 is no star.
+ * Starred candidates are listed first, highest priority on top.
+ */
+export const STAR_LEVELS = [
+  { level: 1, label: 'Priority 1 - highest', color: '#dc2626' },
+  { level: 2, label: 'Priority 2', color: '#ea580c' },
+  { level: 3, label: 'Priority 3', color: '#eab308' },
+  { level: 4, label: 'Priority 4', color: '#16a34a' },
+  { level: 5, label: 'Priority 5 - lowest', color: '#2563eb' },
+];
+
 export const DOMAIN_STATUS = {
   new:            { label: 'NEW',                             tone: 'blue'   },
   submitted:      { label: 'DOMAIN SUBMITTED FOR APPROVAL',   tone: 'purple' },

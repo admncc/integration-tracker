@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { DomainStatus, ProjectStatus, Prospect, ProspectImport } from '../lib/types';
-import { DOMAIN_STATUS, PROJECT_STATUS } from '@shared/domain.js';
+import { DOMAIN_STATUS, PROJECT_STATUS, STAR_LEVELS } from '@shared/domain.js';
 import { Button, Empty, InlineSelect, Modal, Spinner, type Tone } from '../components/ui';
 import { useSession } from '../lib/session';
 
@@ -19,9 +20,9 @@ const DOMAIN_OPTIONS = optionsOf<DomainStatus>(DOMAIN_STATUS);
  * from a symbol font that ignores the text colour, so a marked row showed a
  * black star instead of an amber one.
  */
-function Star({ filled, className = '' }: { filled: boolean; className?: string }) {
+function Star({ filled, className = '', color }: { filled: boolean; className?: string; color?: string }) {
   return (
-    <svg viewBox="0 0 20 20" aria-hidden className={`inline-block size-4 ${className}`}>
+    <svg viewBox="0 0 20 20" aria-hidden className={`inline-block size-4 ${className}`} style={color ? { color } : undefined}>
       <path
         d="M10 1.8l2.47 5.3 5.78.62-4.3 3.92 1.2 5.7L10 14.4l-5.15 2.94 1.2-5.7-4.3-3.92 5.78-.62L10 1.8z"
         fill={filled ? 'currentColor' : 'none'}
@@ -41,6 +42,97 @@ const FIELDS = [
 
 type FieldKey = (typeof FIELDS)[number]['key'];
 
+const starOf = (level: number) => STAR_LEVELS.find((entry) => entry.level === level);
+
+/**
+ * The star in a row: a small menu of the five colours, highest first, and "no
+ * star". Rendered into <body> - the table scrolls inside its card and would
+ * clip it.
+ */
+function StarPicker({ domain, level, disabled, onPick }: { domain: string; level: number; disabled: boolean; onPick: (level: number) => void }) {
+  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const menu = useRef<HTMLDivElement>(null);
+  const current = starOf(level);
+
+  useEffect(() => {
+    if (!at) return;
+    const close = (event: Event) => {
+      if (event.type === 'mousedown' && (menu.current?.contains(event.target as Node) || button.current?.contains(event.target as Node))) return;
+      setAt(null);
+    };
+    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setAt(null);
+    document.addEventListener('mousedown', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', close);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', close);
+      window.removeEventListener('scroll', close, true);
+      window.removeEventListener('resize', close);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [at]);
+
+  return (
+    <>
+      <button
+        ref={button}
+        type="button"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={Boolean(at)}
+        aria-label={current ? `${domain}: star ${current.label}. Change` : `Star ${domain}`}
+        title={current ? current.label : 'Give it a star'}
+        onClick={() => {
+          if (at) return setAt(null);
+          const rect = button.current!.getBoundingClientRect();
+          setAt({ top: rect.bottom + 4, left: Math.max(8, Math.min(rect.left, window.innerWidth - 232)) });
+        }}
+        className={`grid place-items-center rounded p-0.5 transition ${current ? '' : 'text-ink-faint hover:text-ink-soft'}`}
+      >
+        <Star filled={Boolean(current)} color={current?.color} className="size-[18px]" />
+      </button>
+      {at &&
+        createPortal(
+          <div ref={menu} role="menu" style={{ top: at.top, left: at.left }} className="fixed z-50 w-56 rounded-xl border border-line bg-surface p-1.5 text-sm shadow-lg">
+            <div className="px-2 pt-1 pb-1.5 text-xs font-medium text-ink">{domain}</div>
+            {STAR_LEVELS.map((entry) => (
+              <button
+                key={entry.level}
+                role="menuitemradio"
+                aria-checked={entry.level === level}
+                type="button"
+                onClick={() => {
+                  setAt(null);
+                  onPick(entry.level);
+                }}
+                className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-raised ${entry.level === level ? 'bg-raised font-medium' : ''}`}
+              >
+                <Star filled color={entry.color} className="size-4" />
+                {entry.label}
+              </button>
+            ))}
+            <button
+              role="menuitemradio"
+              aria-checked={level === 0}
+              type="button"
+              onClick={() => {
+                setAt(null);
+                onPick(0);
+              }}
+              className="mt-0.5 flex w-full items-center gap-2 rounded-lg border-t border-line px-2 py-1.5 text-left text-ink-soft hover:bg-raised"
+            >
+              <Star filled={false} className="size-4 text-ink-faint" />
+              No star
+            </button>
+          </div>,
+          document.body
+        )}
+    </>
+  );
+}
+
 /**
  * Potential Sites: candidate domains and where each one stands.
  *
@@ -55,7 +147,9 @@ export default function Prospects() {
   const [notice, setNotice] = useState<{ tone: 'red' | 'green'; text: string } | null>(null);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Record<FieldKey, string>>({ project_status: 'all', domain_status: 'all' });
-  const [onlyHigh, setOnlyHigh] = useState(false);
+  /** 'all', 'starred', or one star level as a string. */
+  const [starFilter, setStarFilter] = useState('all');
+  const [bulkStar, setBulkStar] = useState('1');
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [importing, setImporting] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -85,12 +179,13 @@ export default function Prospects() {
       (p) =>
         (filters.project_status === 'all' || p.project_status === filters.project_status) &&
         (filters.domain_status === 'all' || p.domain_status === filters.domain_status) &&
-        (!onlyHigh || p.high_potential === 1) &&
+        (starFilter === 'all' || (starFilter === 'starred' ? p.star > 0 : p.star === Number(starFilter))) &&
         (!term || p.domain.includes(term))
     );
-  }, [prospects, search, filters, onlyHigh]);
+  }, [prospects, search, filters, starFilter]);
 
-  const highCount = prospects.filter((p) => p.high_potential === 1).length;
+  const starCount = (level: number | 'starred') =>
+    prospects.filter((p) => (level === 'starred' ? p.star > 0 : p.star === level)).length;
 
   // A selection that the filter now hides would be acted on unseen.
   const hiddenSelected = [...selected].filter((id) => !visible.some((p) => p.id === id)).length;
@@ -132,17 +227,17 @@ export default function Prospects() {
     }
   }
 
-  /** Marks or unmarks high potential; the server re-sorts, so they move to the top. */
-  async function setHighPotential(ids: number[], value: boolean) {
+  /** Sets the star - 1 (highest) to 5, or 0 for none; the server re-sorts, starred first. */
+  async function setStar(ids: number[], level: number) {
     setBusy(true);
     setNotice(null);
     try {
-      const r = await api.patch<{ changed: number; prospects: Prospect[] }>('/prospects/bulk', { ids, high_potential: value });
+      const r = await api.patch<{ changed: number; prospects: Prospect[] }>('/prospects/bulk', { ids, star: level });
       setProspects(r.prospects);
       if (ids.length > 1) {
         setNotice({
           tone: 'green',
-          text: value ? `${r.changed} domain(s) marked as high potential` : `High potential removed from ${r.changed} domain(s)`,
+          text: level ? `${r.changed} domain(s) starred ${starOf(level)?.label}` : `Star removed from ${r.changed} domain(s)`,
         });
         setSelected(new Set());
       }
@@ -152,6 +247,7 @@ export default function Prospects() {
       setBusy(false);
     }
   }
+
 
   /** "Convert to Integration": into the sites table at priority 1, every track Pending. */
   async function convert(ids: number[]) {
@@ -222,18 +318,29 @@ export default function Prospects() {
       </div>
 
       <div className="space-y-1.5">
+        {/* The legend is the filter: each colour, what it means, and how many carry it. */}
         <div className="flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="w-28 shrink-0 text-ink-faint">Potential</span>
-          <button
-            onClick={() => setOnlyHigh(!onlyHigh)}
-            aria-pressed={onlyHigh}
-            className={`rounded-full border px-2.5 py-1 font-medium transition ${
-              onlyHigh ? 'border-tone-amber bg-tone-amber-bg text-tone-amber' : 'border-line text-ink-soft hover:bg-raised'
-            }`}
-          >
-            <Star filled className="mr-1 -mt-0.5 size-3.5" />
-            High potential only ({highCount})
-          </button>
+          <span className="w-28 shrink-0 text-ink-faint">Star priority</span>
+          {(
+            [
+              ['all', 'All', null],
+              ['starred', `Starred (${starCount('starred')})`, null],
+              ...STAR_LEVELS.map((entry) => [String(entry.level), `${entry.label} (${starCount(entry.level)})`, entry.color]),
+            ] as [string, string, string | null][]
+          ).map(([value, label, color]) => (
+            <button
+              key={value}
+              onClick={() => setStarFilter(starFilter === value && value !== 'all' ? 'all' : value)}
+              aria-pressed={starFilter === value}
+              className={`flex items-center gap-1 rounded-full border px-2.5 py-1 transition ${
+                starFilter === value ? 'border-brand bg-brand-soft text-brand-ink' : 'border-line text-ink-soft hover:bg-raised'
+              }`}
+            >
+              {color && <Star filled color={color} className="size-3.5" />}
+              {value === 'starred' && <Star filled className="size-3.5 text-ink-soft" />}
+              {label}
+            </button>
+          ))}
         </div>
         {FIELDS.map((field) => (
           <div key={field.key} className="flex flex-wrap items-center gap-1.5 text-xs">
@@ -307,12 +414,22 @@ export default function Prospects() {
             </Button>
           </div>
           <div className="flex items-center gap-1.5">
-            <Button size="sm" disabled={busy} onClick={() => setHighPotential([...selected], true)}>
-              <Star filled className="size-3.5 text-tone-amber" />
-              Mark high potential
-            </Button>
-            <Button size="sm" disabled={busy} onClick={() => setHighPotential([...selected], false)}>
-              Unmark
+            <Star filled color={starOf(Number(bulkStar))?.color} className={`size-4 ${bulkStar === '0' ? 'text-ink-faint' : ''}`} />
+            <select
+              className="field !w-auto !py-1 text-xs"
+              aria-label="Star to set"
+              value={bulkStar}
+              onChange={(event) => setBulkStar(event.target.value)}
+            >
+              {STAR_LEVELS.map((entry) => (
+                <option key={entry.level} value={entry.level}>
+                  {entry.label}
+                </option>
+              ))}
+              <option value="0">No star</option>
+            </select>
+            <Button size="sm" disabled={busy} onClick={() => setStar([...selected], Number(bulkStar))}>
+              Star {selected.size}
             </Button>
           </div>
           {canConvert && (
@@ -350,9 +467,9 @@ export default function Prospects() {
                     onChange={toggleAllVisible}
                   />
                 </th>
-                <th className="w-10 px-1 py-2 text-center font-medium text-ink-soft" title="High potential">
+                <th className="w-10 px-1 py-2 text-center font-medium text-ink-soft" title="Star priority">
                   <Star filled={false} className="text-ink-faint" />
-                  <span className="sr-only">High potential</span>
+                  <span className="sr-only">Star priority</span>
                 </th>
                 <th className="px-3 py-2 font-medium text-ink-soft">Domain</th>
                 <th className="w-40 px-3 py-2 font-medium text-ink-soft">Project status</th>
@@ -366,15 +483,14 @@ export default function Prospects() {
               {visible.map((prospect) => (
                 <tr
                   key={prospect.id}
-                  className={`border-b border-line last:border-0 ${
-                    selected.has(prospect.id)
-                      ? 'bg-brand-soft/40'
-                      : prospect.high_potential
-                        ? 'bg-tone-amber-bg/50'
-                        : ''
-                  }`}
+                  className={`border-b border-line last:border-0 ${selected.has(prospect.id) ? 'bg-brand-soft/40' : ''}`}
+                  // A starred row is tinted in its star's colour, with a bar of it down the left edge.
+                  style={!selected.has(prospect.id) && starOf(prospect.star) ? { backgroundColor: `${starOf(prospect.star)!.color}12` } : undefined}
                 >
-                  <td className={`px-3 py-1.5 ${prospect.high_potential ? 'shadow-[inset_4px_0_0_var(--color-tone-amber)]' : ''}`}>
+                  <td
+                    className="px-3 py-1.5"
+                    style={starOf(prospect.star) ? { boxShadow: `inset 4px 0 0 ${starOf(prospect.star)!.color}` } : undefined}
+                  >
                     <input
                       type="checkbox"
                       aria-label={`Select ${prospect.domain}`}
@@ -383,19 +499,7 @@ export default function Prospects() {
                     />
                   </td>
                   <td className="px-1 py-1.5 text-center">
-                    <button
-                      type="button"
-                      disabled={busy}
-                      onClick={() => setHighPotential([prospect.id], !prospect.high_potential)}
-                      aria-pressed={prospect.high_potential === 1}
-                      aria-label={`${prospect.high_potential ? 'Unmark' : 'Mark'} ${prospect.domain} as high potential`}
-                      title={prospect.high_potential ? 'High potential - click to unmark' : 'Mark as high potential'}
-                      className={`grid place-items-center rounded p-0.5 transition ${
-                        prospect.high_potential ? 'text-tone-amber' : 'text-ink-faint hover:text-tone-amber'
-                      }`}
-                    >
-                      <Star filled={prospect.high_potential === 1} className="size-[18px]" />
-                    </button>
+                    <StarPicker domain={prospect.domain} level={prospect.star} disabled={busy} onPick={(level) => setStar([prospect.id], level)} />
                   </td>
                   <td className="truncate px-3 py-1.5" title={prospect.domain}>
                     <span

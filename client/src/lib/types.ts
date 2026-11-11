@@ -207,6 +207,8 @@ export interface Prospect {
   domain_status: DomainStatus;
   /** 1 when marked as high potential: highlighted and listed first. */
   high_potential: number;
+  /** 1 (highest) to 5, 0 for no star. */
+  star: number;
   created_at: string;
   updated_at: string;
   added_by_name: string | null;
