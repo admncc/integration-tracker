@@ -6,6 +6,7 @@ import type { DomainStatus, ProjectStatus, Prospect, ProspectImport } from '../l
 import { DOMAIN_STATUS, PROJECT_STATUS, STAR_LEVELS } from '@shared/domain.js';
 import { Button, Empty, InlineSelect, Modal, Spinner, type Tone } from '../components/ui';
 import { useSession } from '../lib/session';
+import { anchorOf, useMenuPosition, type Anchor } from '../lib/popover';
 import { STICKY_HEAD, TABLE_BOX_PINNED, TABLE_LINES, useKeptScroll } from '../lib/pinnedTable';
 
 type StatusMap = Record<string, { label: string; tone: string }>;
@@ -51,9 +52,10 @@ const starOf = (level: number) => STAR_LEVELS.find((entry) => entry.level === le
  * clip it.
  */
 function StarPicker({ domain, level, disabled, onPick }: { domain: string; level: number; disabled: boolean; onPick: (level: number) => void }) {
-  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const [at, setAt] = useState<Anchor | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const position = useMenuPosition(menu, at);
   const current = starOf(level);
 
   useEffect(() => {
@@ -87,8 +89,7 @@ function StarPicker({ domain, level, disabled, onPick }: { domain: string; level
         title={current ? current.label : 'Give it a star'}
         onClick={() => {
           if (at) return setAt(null);
-          const rect = button.current!.getBoundingClientRect();
-          setAt({ top: rect.bottom + 4, left: Math.max(8, Math.min(rect.left, window.innerWidth - 232)) });
+          setAt(anchorOf(button.current!, 224));
         }}
         className={`grid place-items-center rounded p-0.5 transition ${current ? '' : 'text-ink-faint hover:text-ink-soft'}`}
       >
@@ -96,7 +97,7 @@ function StarPicker({ domain, level, disabled, onPick }: { domain: string; level
       </button>
       {at &&
         createPortal(
-          <div ref={menu} role="menu" style={{ top: at.top, left: at.left }} className="fixed z-50 w-56 rounded-xl border border-line bg-surface p-1.5 text-sm shadow-lg">
+          <div ref={menu} role="menu" style={position} className="fixed z-50 w-56 rounded-xl border border-line bg-surface p-1.5 text-sm shadow-lg">
             <div className="px-2 pt-1 pb-1.5 text-xs font-medium text-ink">{domain}</div>
             {STAR_LEVELS.map((entry) => (
               <button

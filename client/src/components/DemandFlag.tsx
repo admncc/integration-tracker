@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { DEMAND_BLOCK, formatWaiting } from '@shared/domain.js';
 import { useSession } from '../lib/session';
+import { anchorOf, useMenuPosition, type Anchor } from '../lib/popover';
 import type { DemandBlock, Site } from '../lib/types';
 import { Button } from './ui';
 
@@ -69,9 +70,10 @@ function FlagIcon({ filled, className = '' }: { filled: boolean; className?: str
 export function DemandFlagButton({ site, disabled, onSet }: { site: Site; disabled: boolean; onSet: (value: DemandBlock) => void }) {
   const { user } = useSession();
   const state = (site.demand_block ?? 'none') as DemandBlock;
-  const [at, setAt] = useState<{ top: number; left: number } | null>(null);
+  const [at, setAt] = useState<Anchor | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
+  const position = useMenuPosition(menu, at);
 
   useEffect(() => {
     if (!at) return;
@@ -106,8 +108,7 @@ export function DemandFlagButton({ site, disabled, onSet }: { site: Site; disabl
         aria-expanded={Boolean(at)}
         onClick={() => {
           if (at) return setAt(null);
-          const rect = button.current!.getBoundingClientRect();
-          setAt({ top: rect.bottom + 4, left: Math.max(8, Math.min(rect.left, window.innerWidth - 296)) });
+          setAt(anchorOf(button.current!, 288));
         }}
         className={`shrink-0 rounded p-0.5 transition disabled:cursor-default ${
           state === 'mostly_blocked'
@@ -125,7 +126,7 @@ export function DemandFlagButton({ site, disabled, onSet }: { site: Site; disabl
           <div
             ref={menu}
             role="menu"
-            style={{ top: at.top, left: at.left }}
+            style={position}
             className="fixed z-50 w-72 rounded-xl border border-line bg-surface p-1.5 text-sm shadow-lg"
           >
             <div className="px-2 pt-1 pb-1.5 text-xs text-ink-faint">
