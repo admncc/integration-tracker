@@ -38,6 +38,14 @@ at priority 1 with every track on Pending; the row stays on the list as the
 record, with a link to the new site. Starting
 an integration is the publisher's call, as adding a domain by hand is.
 
+**Back to Potential Sites** - the reverse, for an admin: a site whose Video and
+Display are both not live can go back onto the Potential Sites list as NEW (its
+earlier row there is reused, star and all). The button does not appear at all
+while Video or Display is live - on the site's page, or in the selection bar
+when any selected domain has one live. The site leaves the integration process
+with its issues, comments, files and discussion; the confirmation counts them
+first and, if there are any, wants the number of domains typed.
+
 **Sites in integration process** - one row per domain, with the five tracks from the old sheet (video,
 display, ads.txt, ad tag, MCM) plus CMP and partner approval. Every cell is
 editable in place, every column filterable and sortable. Domains can be added,
