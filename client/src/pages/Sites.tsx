@@ -122,6 +122,7 @@ export default function Sites() {
   const [users, setUsers] = useState<User[]>([]);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [movingBack, setMovingBack] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
 
   // Hiding the revenue columns beats rendering "N..." where "New" and "None"
@@ -574,6 +575,13 @@ export default function Sites() {
                   Archive
                 </Button>
               )}
+              {/* Only when every selected domain is still before Video and Display going live. */}
+              {can('delete_site') &&
+                sites.filter((site) => selected.has(site.id)).every((site) => site.status_video !== 'live' && site.status_display !== 'live') && (
+                  <Button size="sm" onClick={() => setMovingBack(true)}>
+                    Back to Potential Sites...
+                  </Button>
+                )}
               {can('delete_site') && (
                 <Button size="sm" variant="danger" onClick={() => setDeleting(true)}>
                   Delete...
@@ -583,6 +591,19 @@ export default function Sites() {
           )}
           <Button size="sm" onClick={() => setSelected(new Set())}>Clear</Button>
         </div>
+      )}
+
+      {movingBack && (
+        <BackToPotentialModal
+          ids={[...selected]}
+          onClose={() => setMovingBack(false)}
+          onMoved={(domains) => {
+            setSites((current) => current.filter((site) => !domains.includes(site.domain)));
+            setSelected(new Set());
+            setMovingBack(false);
+            setNotice({ tone: 'green', text: `Moved back to Potential Sites: ${domains.slice(0, 5).join(', ')}${domains.length > 5 ? ', ...' : ''}` });
+          }}
+        />
       )}
 
       {deleting && (
@@ -1151,6 +1172,110 @@ function BulkDeleteModal({ ids, onClose, onDeleted }: { ids: number[]; onClose: 
           <Button onClick={onClose}>Cancel</Button>
           <Button variant="danger" disabled={!preview || !confirmed || busy} onClick={remove}>
             {busy ? 'Deleting...' : `Delete ${count} domain(s) for good`}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+interface MovePreview {
+  removed: { sites: number; issues: number; messages: number; attachments: number };
+  domains: string[];
+  not_eligible: { domain: string; reason: string }[];
+}
+
+/**
+ * "Back to Potential Sites", for a selection or one site. Only a site whose
+ * Video and Display are both not live can go; the rest are listed and stay.
+ * What leaves with the site is counted first, and if anything would be lost the
+ * number of domains has to be typed - the same weight as a deletion.
+ */
+export function BackToPotentialModal({ ids, onClose, onMoved }: { ids: number[]; onClose: () => void; onMoved: (domains: string[]) => void }) {
+  const [preview, setPreview] = useState<MovePreview | null>(null);
+  const [typed, setTyped] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api
+      .post<MovePreview>('/sites/to-potential', { site_ids: ids, dry_run: true })
+      .then(setPreview)
+      .catch((err) => setError(err instanceof Error ? err.message : 'Could not check the selection'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const count = preview?.domains.length ?? 0;
+  const losesData = preview ? preview.removed.issues + preview.removed.messages + preview.removed.attachments > 0 : false;
+  const confirmed = !losesData || typed.trim() === String(count);
+
+  async function move() {
+    setBusy(true);
+    setError('');
+    try {
+      const result = await api.post<MovePreview>('/sites/to-potential', { site_ids: ids });
+      onMoved(result.domains);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not move them');
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal title="Back to Potential Sites" onClose={onClose}>
+      <div className="space-y-3 text-sm">
+        {!preview && !error && <p className="text-ink-faint">Checking the selection...</p>}
+        {preview && (
+          <>
+            {count > 0 ? (
+              <>
+                <p className="text-ink-soft">
+                  {count === 1 ? 'This domain goes' : `These ${count} domains go`} back to <span className="font-medium text-ink">Potential Sites</span> as
+                  NEW and leave the integration process.
+                </p>
+                <ul className="max-h-36 overflow-y-auto rounded-lg bg-raised px-3 py-2 font-mono text-xs">
+                  {preview.domains.map((domain) => (
+                    <li key={domain}>{domain}</li>
+                  ))}
+                </ul>
+                {losesData ? (
+                  <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-xs text-tone-red">
+                    Deleted with them: {preview.removed.issues} issue(s) with their comments, {preview.removed.attachments} attached file(s)
+                    and {preview.removed.messages} discussion message(s). This cannot be undone.
+                  </p>
+                ) : (
+                  <p className="text-xs text-ink-faint">Nothing else is attached to {count === 1 ? 'it' : 'them'} - no issues, files or discussion.</p>
+                )}
+              </>
+            ) : (
+              <p className="rounded-lg bg-tone-amber-bg px-3 py-2 text-tone-amber">None of the selected domains can go back.</p>
+            )}
+            {preview.not_eligible.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-ink-soft">Staying in integration - only domains whose Video and Display are not live can go back:</p>
+                <ul className="mt-1 max-h-28 overflow-y-auto text-xs text-ink-faint">
+                  {preview.not_eligible.map((entry) => (
+                    <li key={entry.domain}>
+                      <span className="font-mono">{entry.domain}</span> - {entry.reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {count > 0 && losesData && (
+              <label className="block">
+                <span className="text-xs text-ink-soft">
+                  Type <span className="font-mono font-medium text-ink">{count}</span> to confirm
+                </span>
+                <input className="field mt-1" inputMode="numeric" autoFocus value={typed} onChange={(event) => setTyped(event.target.value)} />
+              </label>
+            )}
+          </>
+        )}
+        {error && <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-tone-red">{error}</p>}
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button onClick={onClose}>Cancel</Button>
+          <Button variant="primary" disabled={!preview || count === 0 || !confirmed || busy} onClick={move}>
+            {busy ? 'Moving...' : `Move ${count} back to Potential Sites`}
           </Button>
         </div>
       </div>

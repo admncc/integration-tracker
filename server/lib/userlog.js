@@ -57,6 +57,7 @@ const ROUTES = [
   ['POST', /^\/api\/sites$/, (_m, b) => `added the site ${b?.domain ?? ''}`.trim()],
   ['PATCH', /^\/api\/sites\/bulk$/, (_m, b) => `edited ${count(b?.site_ids)} sites at once: ${fieldsOf(b?.changes)}`],
   ['POST', /^\/api\/sites\/bulk-delete$/, (_m, b) => (b?.dry_run ? null : `deleted ${count(b?.site_ids)} sites: ${(b?.site_ids ?? []).slice(0, 10).map(domainOf).join(', ')}`)],
+  ['POST', /^\/api\/sites\/to-potential$/, (_m, b) => (b?.dry_run ? null : `moved ${count(b?.site_ids)} site(s) back to Potential Sites: ${(b?.site_ids ?? []).slice(0, 10).map(domainOf).join(', ')}`)],
   ['PATCH', /^\/api\/sites\/(\d+)$/, (m, b) => `edited ${domainOf(m[1])}: ${fieldsOf(b)}`],
   ['DELETE', /^\/api\/sites\/(\d+)$/, (m) => `deleted the site ${domainOf(m[1])}`],
   ['POST', /^\/api\/sites\/(\d+)\/messages$/, (m) => `wrote in the discussion of ${domainOf(m[1])}`],

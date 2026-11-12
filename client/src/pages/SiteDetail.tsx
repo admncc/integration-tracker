@@ -7,7 +7,7 @@ import { APPROVAL, CMP, CURRENCIES, DEMAND_BLOCK, ISSUE_STATUS, READINESS, TRACK
 import { Badge, Button, Empty, InlineSelect, InlineText, Modal, Spinner, Timestamp, type Tone } from '../components/ui';
 import IssueCard from '../components/IssueCard';
 import IssueModal from '../components/IssueModal';
-import { parseDecimal } from './Sites';
+import { BackToPotentialModal, parseDecimal } from './Sites';
 import SiteChat from '../components/SiteChat';
 import { DemandBlockPanel } from '../components/DemandFlag';
 
@@ -34,6 +34,7 @@ export default function SiteDetail() {
   const [composing, setComposing] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [confirmText, setConfirmText] = useState('');
+  const [movingBack, setMovingBack] = useState(false);
   /** Whether you get update e-mails about this site. */
   const [watching, setWatching] = useState(false);
 
@@ -405,6 +406,26 @@ export default function SiteDetail() {
             Bring {site.domain} back
           </Button>
         </section>
+      )}
+
+      {/* Only offered while the integration has not really started: neither Video nor Display live. */}
+      {can('delete_site') && site.status_video !== 'live' && site.status_display !== 'live' && (
+        <section className="card p-4">
+          <h2 className="text-sm font-semibold">Back to Potential Sites</h2>
+          <p className="mt-1 mb-3 max-w-2xl text-sm text-ink-soft">
+            Takes {site.domain} out of the integration process and puts it back on the Potential Sites list as NEW. Its issues,
+            comments, files and discussion are deleted with it - the next step shows how many.
+          </p>
+          <Button onClick={() => setMovingBack(true)}>Move {site.domain} back to Potential Sites</Button>
+        </section>
+      )}
+
+      {movingBack && (
+        <BackToPotentialModal
+          ids={[site.id]}
+          onClose={() => setMovingBack(false)}
+          onMoved={() => navigate('/sites?view=potentials')}
+        />
       )}
 
       {can('delete_site') && (

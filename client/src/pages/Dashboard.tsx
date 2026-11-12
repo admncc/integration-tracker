@@ -307,6 +307,8 @@ function ActivityLine({ entry }: { entry: ActivityEntry }) {
       return <>added the domain</>;
     case 'site_deleted':
       return <>deleted the domain {entry.new_value}</>;
+    case 'site_to_potential':
+      return <>moved {entry.old_value} back to <Link to="/sites?view=potentials" className="text-ink hover:text-brand hover:underline">Potential Sites</Link></>;
     case 'user_deleted':
       return <>deleted the account {entry.new_value}</>;
     case 'import':

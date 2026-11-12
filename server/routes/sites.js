@@ -520,6 +520,29 @@ sitesRouter.delete('/:id', requireRole('admin'), (req, res) => {
  *
  * POST rather than DELETE: a DELETE with a body is dropped by some proxies.
  */
+/** What goes when a site goes: its attachment files on disk, and how many issues and messages. */
+function siteFootprint(site) {
+  const keys = db
+    .prepare('SELECT a.storage_key FROM attachments a JOIN issues i ON i.id = a.issue_id WHERE i.site_id = ?')
+    .all(site.id)
+    .map((row) => row.storage_key);
+  return {
+    ...site,
+    keys,
+    issues: db.prepare('SELECT COUNT(*) AS n FROM issues WHERE site_id = ?').get(site.id).n,
+    messages: db.prepare('SELECT COUNT(*) AS n FROM site_messages WHERE site_id = ?').get(site.id).n,
+  };
+}
+
+function footprintTotals(perSite) {
+  return {
+    sites: perSite.length,
+    issues: perSite.reduce((sum, site) => sum + site.issues, 0),
+    messages: perSite.reduce((sum, site) => sum + site.messages, 0),
+    attachments: perSite.reduce((sum, site) => sum + site.keys.length, 0),
+  };
+}
+
 sitesRouter.post('/bulk-delete', requireRole('admin'), (req, res) => {
   const parsed = z
     .object({
@@ -535,24 +558,8 @@ sitesRouter.post('/bulk-delete', requireRole('admin'), (req, res) => {
   const sites = db.prepare(`SELECT id, domain FROM sites WHERE id IN (${placeholders})`).all(...ids);
   if (!sites.length) return res.status(404).json({ error: 'None of those domains exist' });
 
-  const perSite = sites.map((site) => {
-    const keys = db
-      .prepare('SELECT a.storage_key FROM attachments a JOIN issues i ON i.id = a.issue_id WHERE i.site_id = ?')
-      .all(site.id)
-      .map((row) => row.storage_key);
-    return {
-      ...site,
-      keys,
-      issues: db.prepare('SELECT COUNT(*) AS n FROM issues WHERE site_id = ?').get(site.id).n,
-      messages: db.prepare('SELECT COUNT(*) AS n FROM site_messages WHERE site_id = ?').get(site.id).n,
-    };
-  });
-  const totals = {
-    sites: perSite.length,
-    issues: perSite.reduce((sum, site) => sum + site.issues, 0),
-    messages: perSite.reduce((sum, site) => sum + site.messages, 0),
-    attachments: perSite.reduce((sum, site) => sum + site.keys.length, 0),
-  };
+  const perSite = sites.map(siteFootprint);
+  const totals = footprintTotals(perSite);
   if (parsed.data.dry_run) return res.json({ dry_run: true, removed: totals, domains: perSite.map((site) => site.domain) });
 
   db.exec('BEGIN');
@@ -578,6 +585,79 @@ sitesRouter.post('/bulk-delete', requireRole('admin'), (req, res) => {
   for (const site of perSite) site.keys.forEach(removeUpload);
 
   res.json({ ok: true, removed: totals, domains: perSite.map((site) => site.domain), skipped: ids.filter((id) => !sites.some((s) => s.id === id)) });
+});
+
+/**
+ * "Back to Potential Sites": the reverse of "Convert to Integration", for a
+ * site whose integration has not really started - Video and Display both not
+ * Live. Anything else is skipped and named.
+ *
+ * The domain goes back on the Potential Sites list as NEW; a row it already
+ * had there (from an earlier conversion) is reused, star and all. The site
+ * itself leaves the integration process - with its issues, comments, files and
+ * discussion, the same as deleting it - so it is the publisher admin's call,
+ * and `dry_run` counts what would go first.
+ */
+sitesRouter.post('/to-potential', requireRole('admin'), (req, res) => {
+  const parsed = z
+    .object({
+      site_ids: z.array(z.coerce.number().int().positive()).min(1, 'Pick at least one domain').max(500),
+      dry_run: z.boolean().default(false),
+    })
+    .strict()
+    .safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error) });
+
+  const ids = [...new Set(parsed.data.site_ids)];
+  const sites = db
+    .prepare(`SELECT id, domain, status_video, status_display FROM sites WHERE id IN (${ids.map(() => '?').join(',')})`)
+    .all(...ids);
+  if (!sites.length) return res.status(404).json({ error: 'None of those domains exist' });
+
+  const live = sites.filter((site) => site.status_video === 'live' || site.status_display === 'live');
+  const eligible = sites.filter((site) => !live.includes(site)).map(siteFootprint);
+  const notEligible = live.map((site) => ({
+    domain: site.domain,
+    reason: [site.status_video === 'live' && 'Video', site.status_display === 'live' && 'Display'].filter(Boolean).join(' and ') + ' live',
+  }));
+  const totals = footprintTotals(eligible);
+
+  if (parsed.data.dry_run || !eligible.length) {
+    if (!parsed.data.dry_run) {
+      return res.status(409).json({ error: 'None of them can go back: Video or Display is already live', not_eligible: notEligible });
+    }
+    return res.json({ dry_run: true, removed: totals, domains: eligible.map((site) => site.domain), not_eligible: notEligible });
+  }
+
+  const existing = db.prepare('SELECT id FROM prospects WHERE domain = ?');
+  const reopen = db.prepare("UPDATE prospects SET project_status = 'new', updated_at = datetime('now') WHERE id = ?");
+  const insert = db.prepare("INSERT INTO prospects (domain, project_status, domain_status, added_by) VALUES (?, 'new', 'new', ?)");
+  const remove = db.prepare('DELETE FROM sites WHERE id = ?');
+
+  db.exec('BEGIN');
+  try {
+    for (const site of eligible) {
+      const row = existing.get(site.domain);
+      if (row) reopen.run(row.id);
+      else insert.run(site.domain, req.user.id);
+      remove.run(site.id);
+      // With no site_id, so it outlives the site, like a deletion.
+      logActivity({
+        actorId: req.user.id,
+        kind: 'site_to_potential',
+        field: 'domain',
+        oldValue: site.domain,
+        newValue: `${site.domain} (${site.issues} issue(s), ${site.messages} message(s), ${site.keys.length} file(s) removed)`,
+      });
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  for (const site of eligible) site.keys.forEach(removeUpload);
+
+  res.json({ ok: true, removed: totals, domains: eligible.map((site) => site.domain), not_eligible: notEligible });
 });
 
 /** What the column is called on screen, not what it is called in the database. */
