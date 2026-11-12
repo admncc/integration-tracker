@@ -377,7 +377,6 @@ export default function Sites() {
   }, [sites]);
 
   /** Still up while the demand side refuses them - what the alert banner lists. */
-  const flagged = useMemo(() => sites.filter((site) => site.demand_block === 'mostly_blocked' && !site.archived), [sites]);
 
   function toggleSort(key: string) {
     setSort((current) => (current.key === key ? { key, dir: current.dir === 1 ? -1 : 1 } : { key, dir: 1 }));
@@ -492,6 +491,18 @@ export default function Sites() {
               key={key}
               onClick={() => setReadiness(readiness === key ? 'all' : key)}
               aria-pressed={readiness === key}
+              /*
+               * The red chip, the red rows and the inbox carry the alarm; the
+               * big alert box above the table took too much room and is gone.
+               * What to do about it is here instead.
+               */
+              title={
+                key === 'mostly_blocked' && readinessCounts.mostly_blocked > 0
+                  ? can('manage_sites')
+                    ? 'Show only these. Take them offline, then mark each one "Taken offline" with the flag - that ends the alert.'
+                    : 'Show only these. The publisher has been alerted to take them offline.'
+                  : undefined
+              }
               className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 transition ${
                 readiness === key
                   ? 'border-brand bg-brand-soft text-brand-ink'
@@ -505,30 +516,6 @@ export default function Sites() {
             </button>
           ))}
       </div>
-
-      {flagged.length > 0 && (
-        <div role="alert" className="rounded-xl border border-tone-red/40 bg-tone-red-bg px-4 py-3 text-sm text-tone-red">
-          <div className="font-semibold">
-            ⚠ {flagged.length === 1 ? '1 site is' : `${flagged.length} sites are`} mostly blocked by demand partners
-          </div>
-          {/* Stays above the table: past about four domains the list scrolls on its own. */}
-          <ul className="mt-1 space-y-0.5 pinned:max-h-24 pinned:overflow-y-auto">
-            {flagged.map((site) => (
-              <li key={site.id}>
-                <Link to={`/sites/${site.id}`} className="font-medium underline-offset-2 hover:underline">
-                  {site.domain}
-                </Link>{' '}
-                <span className="text-xs opacity-80">{flaggedBy(site)}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="mt-1.5 text-xs opacity-80">
-            {can('manage_sites')
-              ? `Take ${flagged.length === 1 ? 'it' : 'them'} offline, then mark ${flagged.length === 1 ? 'it' : 'each one'} "Taken offline" with the flag - that ends the alert.`
-              : `The publisher has been alerted to take ${flagged.length === 1 ? 'it' : 'them'} offline.`}
-          </p>
-        </div>
-      )}
 
       {notice && (
         <div className={`rounded-lg px-3 py-2 text-sm ${notice.tone === 'red' ? 'bg-tone-red-bg text-tone-red' : 'bg-tone-green-bg text-tone-green'}`}>

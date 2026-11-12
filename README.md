@@ -65,8 +65,8 @@ a name costs more width than it earns in a list you scan for status.
 
 **Mostly blocked by demand partners** - the flag next to each domain. When the
 demand side refuses most of a site's traffic, the partner flags it: the row
-turns red, a red banner above the table lists it, and the publisher's "waiting
-on you" and the daily digest lead with it. The publisher takes the site offline
+turns red, the red "Mostly blocked by demand partners" chip above the table
+counts it and shows only those on a click, and the publisher's "waiting on you" and the daily digest lead with it. The publisher takes the site offline
 and marks it **Taken offline**, which ends the alert and keeps the record (the
 row is struck through and greyed). Only the publisher can say a site is offline;
 either side can withdraw a flag. Who flagged it and since when sits next to it,
