@@ -8,6 +8,7 @@ import { DemandFlagButton, flaggedBy } from '../components/DemandFlag';
 import { Badge, Button, CurrencyToggle, Empty, Field, InlineSelect, InlineText, Modal, Spinner, type Tone } from '../components/ui';
 import IssueModal from '../components/IssueModal';
 import NetworkIssues from '../components/NetworkIssues';
+import { STICKY_HEAD, TABLE_BOX_PINNED, TABLE_LINES, useKeptScroll } from '../lib/pinnedTable';
 
 type FilterMap = Record<string, string>;
 type SortState = { key: string; dir: 1 | -1 };
@@ -109,6 +110,7 @@ export default function Sites() {
   const { can, eurUsd } = useSession();
   const [sites, setSites] = useState<Site[]>([]);
   const [loading, setLoading] = useState(true);
+  const tableBox = useKeptScroll<HTMLDivElement>('sites', !loading);
   const [notice, setNotice] = useState<{ tone: 'red' | 'green'; text: string } | null>(null);
 
   const [search, setSearch] = useState('');
@@ -392,7 +394,7 @@ export default function Sites() {
   if (loading) return <Spinner />;
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4 pinned:min-h-0 pinned:flex-1">
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <h1 className="text-lg font-semibold">Sites in integration process</h1>
@@ -509,7 +511,8 @@ export default function Sites() {
           <div className="font-semibold">
             ⚠ {flagged.length === 1 ? '1 site is' : `${flagged.length} sites are`} mostly blocked by demand partners
           </div>
-          <ul className="mt-1 space-y-0.5">
+          {/* Stays above the table: past about four domains the list scrolls on its own. */}
+          <ul className="mt-1 space-y-0.5 pinned:max-h-24 pinned:overflow-y-auto">
             {flagged.map((site) => (
               <li key={site.id}>
                 <Link to={`/sites/${site.id}`} className="font-medium underline-offset-2 hover:underline">
@@ -624,10 +627,10 @@ export default function Sites() {
        * without the track selects turning into bare chevrons, so on a tablet or
        * a phone the table keeps that width and scrolls inside its card.
        */}
-      <div className="card relative overflow-x-auto">
-        <table className="w-full min-w-[980px] table-fixed border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-line bg-raised">
+      <div ref={tableBox} className={`card relative overflow-x-auto ${TABLE_BOX_PINNED}`}>
+        <table className={`w-full min-w-[980px] table-fixed text-sm ${TABLE_LINES}`}>
+          <thead className={STICKY_HEAD}>
+            <tr className="bg-raised [&>th]:bg-raised">
               <th className="bg-raised px-2 py-2" style={{ width: widthOf(SELECT_COLUMN_WEIGHT) }}>
                 <input
                   type="checkbox"
@@ -646,7 +649,7 @@ export default function Sites() {
               ))}
             </tr>
 
-            <tr className="border-b border-line bg-surface">
+            <tr className="bg-surface [&>th]:bg-surface">
               <th className="bg-surface" />
               {columns.map((column) => (
                 <th key={column.key} className="overflow-hidden px-1.5 py-1.5 font-normal">
@@ -664,7 +667,7 @@ export default function Sites() {
             {visible.map((site) => (
               <tr
                 key={site.id}
-                className={`border-b border-line last:border-0 ${
+                className={`${
                   site.demand_block === 'mostly_blocked'
                     ? 'bg-tone-red-bg hover:brightness-[0.98]'
                     : `hover:bg-raised/60 ${(site.open_issues ?? 0) > 0 ? 'bg-tone-red-bg/25' : ''}`

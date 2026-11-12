@@ -1,6 +1,14 @@
 @import 'tailwindcss';
 
 /*
+ * `pinned:` - a screen big enough to keep a page's heading, filters and alerts
+ * in place while only its table scrolls (the Sites tabs). Smaller than this -
+ * a phone, a laptop window cut in half - the whole page scrolls as before,
+ * because a fixed top would leave the table a sliver.
+ */
+@custom-variant pinned (@media (min-width: 1024px) and (min-height: 560px));
+
+/*
  * Semantic tokens rather than raw palette classes: utilities compile to
  * `var(--color-...)`, so the dark scheme below is a single override block
  * instead of a `dark:` variant on every element.

@@ -32,8 +32,11 @@ export default function App() {
   if (loading) return <Spinner />;
   if (!user) return <Login />;
 
+  // The Sites tabs keep their top in place and scroll only the table (see `pinned` in index.css).
+  const pinned = location.pathname === '/sites';
+
   return (
-    <div className="flex min-h-full flex-col">
+    <div className={`flex min-h-full flex-col ${pinned ? 'pinned:h-dvh' : ''}`}>
       <header className="sticky top-0 z-30 border-b border-line bg-surface/85 backdrop-blur">
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-x-6 gap-y-2 px-4 py-2.5">
           <Link to="/" aria-label="Integration Tracker - dashboard" className="rounded-lg">
@@ -72,7 +75,7 @@ export default function App() {
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-[1600px] flex-1 px-4 py-6">
+      <main className={`mx-auto w-full max-w-[1600px] flex-1 px-4 py-6 ${pinned ? 'pinned:flex pinned:min-h-0 pinned:flex-col pinned:overflow-y-auto' : ''}`}>
         <Routes>
           <Route path="/" element={<Dashboard />} />
           <Route path="/sites" element={<SitesPage />} />

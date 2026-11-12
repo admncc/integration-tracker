@@ -6,6 +6,7 @@ import type { DomainStatus, ProjectStatus, Prospect, ProspectImport } from '../l
 import { DOMAIN_STATUS, PROJECT_STATUS, STAR_LEVELS } from '@shared/domain.js';
 import { Button, Empty, InlineSelect, Modal, Spinner, type Tone } from '../components/ui';
 import { useSession } from '../lib/session';
+import { STICKY_HEAD, TABLE_BOX_PINNED, TABLE_LINES, useKeptScroll } from '../lib/pinnedTable';
 
 type StatusMap = Record<string, { label: string; tone: string }>;
 
@@ -144,6 +145,7 @@ function StarPicker({ domain, level, disabled, onPick }: { domain: string; level
 export default function Prospects() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
+  const tableBox = useKeptScroll<HTMLDivElement>('potentials', !loading && prospects.length > 0);
   const [notice, setNotice] = useState<{ tone: 'red' | 'green'; text: string } | null>(null);
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<Record<FieldKey, string>>({ project_status: 'all', domain_status: 'all' });
@@ -296,7 +298,7 @@ export default function Prospects() {
   if (loading) return <Spinner />;
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-4 pinned:min-h-0 pinned:flex-1">
       <div className="flex flex-wrap items-center gap-3">
         <div>
           <h1 className="text-lg font-semibold">Potential Sites</h1>
@@ -455,10 +457,10 @@ export default function Prospects() {
         // inside its card rather than pushing the whole page sideways.
         // `relative` keeps the screen-reader-only header labels (absolutely
         // positioned) inside that card - without it they widened the page.
-        <div className="card relative overflow-x-auto">
-          <table className="w-full min-w-[960px] table-fixed border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-line bg-raised text-left">
+        <div ref={tableBox} className={`card relative overflow-x-auto ${TABLE_BOX_PINNED}`}>
+          <table className={`w-full min-w-[960px] table-fixed text-sm ${TABLE_LINES}`}>
+            <thead className={STICKY_HEAD}>
+              <tr className="bg-raised text-left [&>th]:bg-raised">
                 <th className="w-10 px-3 py-2">
                   <input
                     type="checkbox"
@@ -483,7 +485,7 @@ export default function Prospects() {
               {visible.map((prospect) => (
                 <tr
                   key={prospect.id}
-                  className={`border-b border-line last:border-0 ${selected.has(prospect.id) ? 'bg-brand-soft/40' : ''}`}
+                  className={selected.has(prospect.id) ? 'bg-brand-soft/40' : undefined}
                   // A starred row is tinted in its star's colour, with a bar of it down the left edge.
                   style={!selected.has(prospect.id) && starOf(prospect.star) ? { backgroundColor: `${starOf(prospect.star)!.color}12` } : undefined}
                 >

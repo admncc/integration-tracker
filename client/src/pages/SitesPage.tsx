@@ -21,8 +21,8 @@ export default function SitesPage() {
   const view = params.get('view') === 'potentials' ? 'potentials' : 'sites';
 
   return (
-    <div className="space-y-4">
-      <nav className="flex gap-1 border-b border-line" aria-label="Sites sections">
+    <div className="flex flex-col gap-4 pinned:min-h-0 pinned:flex-1">
+      <nav className="flex shrink-0 gap-1 border-b border-line" aria-label="Sites sections">
         {TABS.map((tab) => {
           const active = view === tab.key;
           return (

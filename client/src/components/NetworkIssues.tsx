@@ -93,8 +93,12 @@ export default function NetworkIssues({ sites, onIssuesChanged }: { sites: Site[
 
       {error && <p className="mt-3 rounded-lg bg-tone-red-bg px-3 py-2 text-xs text-tone-red">{error}</p>}
 
+      {/*
+       * On the Sites tab this card stays on screen above the table (`pinned:`),
+       * so each list keeps to about four lines and scrolls on its own past that.
+       */}
       {open.length > 0 && !expanded && (
-        <ul className="mt-3 space-y-1.5">
+        <ul className="mt-3 space-y-1.5 pinned:max-h-28 pinned:overflow-y-auto">
           {open.map((issue) => (
             <li key={issue.id} className="flex flex-wrap items-center gap-2 text-sm">
               <Badge tone={(ISSUE_STATUS[issue.status] as { tone: Tone }).tone}>{ISSUE_STATUS[issue.status].label}</Badge>
@@ -110,7 +114,7 @@ export default function NetworkIssues({ sites, onIssuesChanged }: { sites: Site[
       )}
 
       {expanded && (
-        <div className="mt-3 space-y-2">
+        <div className="mt-3 space-y-2 pinned:max-h-[40vh] pinned:overflow-y-auto">
           {[...open, ...closed].map((issue) => (
             <IssueCard
               key={issue.id}
@@ -130,7 +134,7 @@ export default function NetworkIssues({ sites, onIssuesChanged }: { sites: Site[
       {rollouts.length > 0 && (
         <div className="mt-3 border-t border-line pt-3">
           <h3 className="mb-2 text-xs font-medium text-ink-soft">Running on every domain</h3>
-          <ul className="space-y-1.5">
+          <ul className="space-y-1.5 pinned:max-h-28 pinned:overflow-y-auto">
             {rollouts.map((rollout) => (
               <li key={rollout.id} className="flex flex-wrap items-center gap-2 text-sm">
                 <Link
