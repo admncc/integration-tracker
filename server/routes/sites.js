@@ -534,6 +534,13 @@ function siteFootprint(site) {
   };
 }
 
+/** Per domain, for the confirmation: which ones still have something in them. Those first. */
+function footprintList(perSite) {
+  return perSite
+    .map((site) => ({ id: site.id, domain: site.domain, issues: site.issues, messages: site.messages, attachments: site.keys.length }))
+    .sort((a, b) => b.issues + b.messages + b.attachments - (a.issues + a.messages + a.attachments) || a.domain.localeCompare(b.domain));
+}
+
 function footprintTotals(perSite) {
   return {
     sites: perSite.length,
@@ -560,7 +567,9 @@ sitesRouter.post('/bulk-delete', requireRole('admin'), (req, res) => {
 
   const perSite = sites.map(siteFootprint);
   const totals = footprintTotals(perSite);
-  if (parsed.data.dry_run) return res.json({ dry_run: true, removed: totals, domains: perSite.map((site) => site.domain) });
+  if (parsed.data.dry_run) {
+    return res.json({ dry_run: true, removed: totals, domains: perSite.map((site) => site.domain), sites: footprintList(perSite) });
+  }
 
   db.exec('BEGIN');
   try {
@@ -626,7 +635,7 @@ sitesRouter.post('/to-potential', requireRole('admin'), (req, res) => {
     if (!parsed.data.dry_run) {
       return res.status(409).json({ error: 'None of them can go back: Video or Display is already live', not_eligible: notEligible });
     }
-    return res.json({ dry_run: true, removed: totals, domains: eligible.map((site) => site.domain), not_eligible: notEligible });
+    return res.json({ dry_run: true, removed: totals, domains: eligible.map((site) => site.domain), sites: footprintList(eligible), not_eligible: notEligible });
   }
 
   const existing = db.prepare('SELECT id FROM prospects WHERE domain = ?');

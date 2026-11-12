@@ -1101,9 +1101,56 @@ function BulkEdit({
   );
 }
 
+interface SiteFootprint {
+  id: number;
+  domain: string;
+  issues: number;
+  messages: number;
+  attachments: number;
+}
+
+/**
+ * The domains a confirmation is about, each with what is still in it. The
+ * server lists the ones with content first; each opens in a new tab, so it can
+ * be looked at before anything is deleted.
+ */
+function FootprintList({ sites }: { sites: SiteFootprint[] }) {
+  const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+  return (
+    <ul className="max-h-48 divide-y divide-line overflow-y-auto rounded-lg bg-raised text-xs">
+      {sites.map((site) => {
+        const parts = [
+          site.issues > 0 && plural(site.issues, 'issue', 'issues'),
+          site.messages > 0 && plural(site.messages, 'message', 'messages'),
+          site.attachments > 0 && plural(site.attachments, 'file', 'files'),
+        ].filter(Boolean) as string[];
+        return (
+          <li key={site.id} className="flex items-center gap-2 px-3 py-1.5">
+            <a
+              href={`/sites/${site.id}`}
+              target="_blank"
+              rel="noopener"
+              title="Open in a new tab"
+              className={`font-mono hover:text-brand hover:underline ${parts.length ? 'font-semibold text-ink' : 'text-ink-soft'}`}
+            >
+              {site.domain}
+            </a>
+            {parts.length ? (
+              <span className="ml-auto shrink-0 rounded-full bg-tone-red-bg px-2 py-0.5 font-medium text-tone-red">{parts.join(' · ')}</span>
+            ) : (
+              <span className="ml-auto shrink-0 text-ink-faint">empty</span>
+            )}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 interface DeletePreview {
   removed: { sites: number; issues: number; messages: number; attachments: number };
   domains: string[];
+  sites?: SiteFootprint[];
 }
 
 /**
@@ -1149,11 +1196,15 @@ function BulkDeleteModal({ ids, onClose, onDeleted }: { ids: number[]; onClose: 
               {preview.removed.attachments} attached file(s) and {preview.removed.messages} discussion message(s). It cannot be
               undone. <span className="font-medium text-ink">Archive</span> keeps all of it and can be reversed.
             </p>
-            <ul className="max-h-40 overflow-y-auto rounded-lg bg-raised px-3 py-2 font-mono text-xs">
-              {preview.domains.map((domain) => (
-                <li key={domain}>{domain}</li>
-              ))}
-            </ul>
+            {preview.sites ? (
+              <FootprintList sites={preview.sites} />
+            ) : (
+              <ul className="max-h-40 overflow-y-auto rounded-lg bg-raised px-3 py-2 font-mono text-xs">
+                {preview.domains.map((domain) => (
+                  <li key={domain}>{domain}</li>
+                ))}
+              </ul>
+            )}
           </>
         ) : (
           !error && <p className="text-ink-faint">Counting what would be deleted...</p>
@@ -1182,6 +1233,7 @@ function BulkDeleteModal({ ids, onClose, onDeleted }: { ids: number[]; onClose: 
 interface MovePreview {
   removed: { sites: number; issues: number; messages: number; attachments: number };
   domains: string[];
+  sites?: SiteFootprint[];
   not_eligible: { domain: string; reason: string }[];
 }
 
@@ -1232,15 +1284,21 @@ export function BackToPotentialModal({ ids, onClose, onMoved }: { ids: number[];
                   {count === 1 ? 'This domain goes' : `These ${count} domains go`} back to <span className="font-medium text-ink">Potential Sites</span> as
                   NEW and leave the integration process.
                 </p>
-                <ul className="max-h-36 overflow-y-auto rounded-lg bg-raised px-3 py-2 font-mono text-xs">
-                  {preview.domains.map((domain) => (
-                    <li key={domain}>{domain}</li>
-                  ))}
-                </ul>
+                {preview.sites ? (
+                  <FootprintList sites={preview.sites} />
+                ) : (
+                  <ul className="max-h-36 overflow-y-auto rounded-lg bg-raised px-3 py-2 font-mono text-xs">
+                    {preview.domains.map((domain) => (
+                      <li key={domain}>{domain}</li>
+                    ))}
+                  </ul>
+                )}
                 {losesData ? (
                   <p className="rounded-lg bg-tone-red-bg px-3 py-2 text-xs text-tone-red">
                     Deleted with them: {preview.removed.issues} issue(s) with their comments, {preview.removed.attachments} attached file(s)
-                    and {preview.removed.messages} discussion message(s). This cannot be undone.
+                    and {preview.removed.messages} discussion message(s)
+                    {preview.sites && ` - on ${preview.sites.filter((x) => x.issues + x.messages + x.attachments > 0).map((x) => x.domain).join(', ')}`}.
+                    This cannot be undone.
                   </p>
                 ) : (
                   <p className="text-xs text-ink-faint">Nothing else is attached to {count === 1 ? 'it' : 'them'} - no issues, files or discussion.</p>
