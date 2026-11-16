@@ -287,12 +287,28 @@ const LATE_COLUMNS = [
   ['users', 'notify_token', 'TEXT'],
   // The last request this person made, for "online now" in the log.
   ['users', 'last_seen_at', 'TEXT'],
+  // Prio X (shared/domain.js REMOVED_PRIORITY): why the site left the network, who said so and when.
+  ['sites', 'removed_reason', 'TEXT'],
+  ['sites', 'removed_at', 'TEXT'],
+  ['sites', 'removed_by', 'INTEGER REFERENCES users(id) ON DELETE SET NULL'],
 ];
 
 for (const [table, column, definition] of LATE_COLUMNS) {
   const present = db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === column);
   if (!present) db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
+
+/*
+ * A removed site given a number again is back in the network, whichever way the
+ * number arrived - the table, a bulk change, the importer. The reason goes with
+ * it here, once, instead of in every one of those code paths.
+ */
+db.exec(`CREATE TRIGGER IF NOT EXISTS sites_back_in_network
+  AFTER UPDATE OF priority ON sites
+  WHEN NEW.priority < 100 AND OLD.priority >= 100
+  BEGIN
+    UPDATE sites SET removed_reason = NULL, removed_at = NULL, removed_by = NULL WHERE id = NEW.id;
+  END`);
 
 /** Renames the earlier generic RPM columns onto the two the team actually enters. */
 const siteColumns = db.prepare('PRAGMA table_info(sites)').all().map((c) => c.name);

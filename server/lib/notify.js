@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { db, onActivity } from './db.js';
 import { mailConfigured, sendMail } from './mail.js';
 import { publicUrl } from './login.js';
-import { APPROVAL, CMP, DEMAND_BLOCK, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY, TRACK_STATUS } from '../../shared/domain.js';
+import { APPROVAL, CMP, DEMAND_BLOCK, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, REMOVED_PRIORITY, SEVERITY, TRACK_STATUS } from '../../shared/domain.js';
 
 /**
  * Update e-mails about a site.
@@ -128,6 +128,13 @@ export function describe(entry) {
     case 'site_updated': {
       if (entry.field === 'owner_id') text = value ? `made ${nameOf(value)} responsible` : 'removed the responsible person';
       else if (entry.field === 'archived') text = value === '1' ? 'archived the site' : 'brought the site back';
+      else if (entry.field === 'removed_reason') {
+        text = value
+          ? entry.oldValue
+            ? `changed why it was removed from the network: "${value}"`
+            : `REMOVED IT FROM THE NETWORK (prio X): "${value}"`
+          : 'brought it back into the network';
+      } else if (entry.field === 'priority' && Number(value) >= REMOVED_PRIORITY) text = 'set the priority to X';
       else if (entry.field === 'demand_block') {
         text =
           value === 'mostly_blocked'

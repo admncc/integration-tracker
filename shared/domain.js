@@ -192,9 +192,22 @@ export function rpmUplift(site, eurUsd = DEFAULT_EUR_USD) {
 export const INACTIVE_PRIORITY = 99;
 
 /**
+ * Prio "X": taken out of the network, with the publisher's reason. Stored as
+ * 100 so it sorts after 99 everywhere and every "priority < 99" count leaves it
+ * out; typing a number back in returns it to the network (the reason is cleared
+ * by a trigger in db.js).
+ */
+export const REMOVED_PRIORITY = 100;
+export const isRemoved = (site) => Number(site?.priority) >= REMOVED_PRIORITY;
+
+/** How a priority reads on screen: the number, or X. */
+export const priorityLabel = (priority) => (Number(priority) >= REMOVED_PRIORITY ? 'X' : String(priority ?? ''));
+
+/**
  * The traffic light on a domain, and the single definition of "live" the whole
  * tool uses:
  *
+ *   removed    - prio X, taken out of the network
  *   inactive   - priority 99, parked rather than being worked on
  *   live       - all five integration tracks are Live
  *   incomplete - anything else
@@ -203,6 +216,7 @@ export const INACTIVE_PRIORITY = 99;
  * by the issue count and the row highlight.
  */
 export function siteReadiness(site) {
+  if (isRemoved(site)) return 'removed';
   if (Number(site.priority) >= INACTIVE_PRIORITY) return 'inactive';
   return TRACKS.every(({ key }) => site[key] === 'live') ? 'live' : 'incomplete';
 }
@@ -211,6 +225,7 @@ export const READINESS = {
   live: { tone: 'green', label: 'Live', dot: 'bg-tone-green' },
   incomplete: { tone: 'red', label: 'Not fully live', dot: 'bg-tone-red' },
   inactive: { tone: 'muted', label: 'Not active', dot: 'bg-tone-muted' },
+  removed: { tone: 'red', label: 'Removed from network', dot: 'bg-ink' },
 };
 
 /** The tracks still standing between a site and a green light. */

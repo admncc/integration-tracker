@@ -3,7 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Site, TrackStatus, User } from '../lib/types';
-import { APPROVAL, CMP, DEMAND_BLOCK, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteReadiness } from '@shared/domain.js';
+import { APPROVAL, CMP, DEMAND_BLOCK, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, isRemoved, missingTracks, priorityLabel, rpmUplift, siteReadiness } from '@shared/domain.js';
+import { RemoveFromNetworkModal, isRemoveCommand, removedLine } from '../components/RemovedSite';
 import { DemandFlagButton, flaggedBy } from '../components/DemandFlag';
 import { Badge, Button, CurrencyToggle, Empty, Field, InlineSelect, InlineText, Modal, Spinner, type Tone } from '../components/ui';
 import IssueModal from '../components/IssueModal';
@@ -118,7 +119,11 @@ export default function Sites() {
   const [sort, setSort] = useState<SortState>({ key: 'priority', dir: 1 });
   const [showArchived, setShowArchived] = useState(false);
   /** The traffic-light chips, plus the two demand-partner flags, which filter the same way. */
-  const [readiness, setReadiness] = useState<'all' | 'live' | 'incomplete' | 'inactive' | 'mostly_blocked' | 'offline'>('all');
+  const [readiness, setReadiness] = useState<'all' | 'live' | 'incomplete' | 'inactive' | 'removed' | 'mostly_blocked' | 'offline'>('all');
+  /** The site whose Prio was just set to X, waiting for a reason. */
+  const [removing, setRemoving] = useState<Site | null>(null);
+  /** Bumped to put cells back to their saved value after a refused or cancelled edit. */
+  const [resetTick, setResetTick] = useState(0);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [adding, setAdding] = useState(false);
   const [users, setUsers] = useState<User[]>([]);
@@ -207,6 +212,16 @@ export default function Sites() {
    *    kept it.
    */
   async function patchSite(site: Site, field: string, raw: string) {
+    // Prio X: the site leaves the network - but not before somebody says why.
+    if (field === 'priority' && isRemoveCommand(raw)) {
+      setResetTick((tick) => tick + 1);
+      if (!can('manage_sites')) {
+        setNotice({ tone: 'red', text: 'Only the publisher can take a site out of the network (prio X).' });
+        return;
+      }
+      setRemoving(site);
+      return;
+    }
     // Only the amounts are numeric - `rpm_*_currency` is a code and must stay a string.
     const numeric = field === 'priority' || field === 'rpm_previous' || field === 'rpm_primis';
     let value: string | number | null = raw;
@@ -218,7 +233,7 @@ export default function Sites() {
           // NaN used to reach the server as JSON null, wiping the stored figure
           // without a word.
           setNotice({ tone: 'red', text: `"${raw}" is not a number. The previous value was kept.` });
-          setSites((current) => [...current]);
+          setResetTick((tick) => tick + 1);
           return;
         }
         value = parsed;
@@ -302,6 +317,9 @@ export default function Sites() {
 
       return Object.entries(filters).every(([key, value]) => {
         if (!value) return true;
+        if (key === 'priority') return priorityLabel(site.priority).toLowerCase().includes(value.trim().toLowerCase());
+        // A removed site shows no columns, so it cannot match a filter on one.
+        if (isRemoved(site) && key !== 'domain') return false;
         if (key === 'rpm_uplift') {
           const uplift = rpmUplift(site, eurUsd);
           if (value === 'up') return uplift != null && uplift > 0;
@@ -337,6 +355,8 @@ export default function Sites() {
     } as Record<string, string[]>;
 
     return rows.sort((a, b) => {
+      // Prio X stays at the bottom, below prio 99, whatever the table is sorted by.
+      if (isRemoved(a) !== isRemoved(b)) return isRemoved(a) ? 1 : -1;
       const order = ORDERED[sort.key];
       if (order) {
         const left = order.indexOf(String(a[sort.key as keyof Site]));
@@ -368,7 +388,7 @@ export default function Sites() {
   const activeFilters = Object.values(filters).filter(Boolean).length + (search ? 1 : 0) + (readiness === 'all' ? 0 : 1);
 
   const readinessCounts = useMemo(() => {
-    const counts = { live: 0, incomplete: 0, inactive: 0, mostly_blocked: 0, offline: 0 };
+    const counts = { live: 0, incomplete: 0, inactive: 0, removed: 0, mostly_blocked: 0, offline: 0 };
     for (const site of sites) {
       counts[siteReadiness(site)] += 1;
       if (site.demand_block === 'mostly_blocked' || site.demand_block === 'offline') counts[site.demand_block] += 1;
@@ -464,8 +484,12 @@ export default function Sites() {
             ['live', `All five tracks live (${readinessCounts.live})`],
             ['incomplete', `Not fully live (${readinessCounts.incomplete})`],
             ['inactive', `Priority 99 - not active (${readinessCounts.inactive})`],
+            ['removed', `Prio X - removed from network (${readinessCounts.removed})`],
           ] as const
-        ).map(([key, label]) => (
+        )
+          // Prio X earns a chip once a site has it.
+          .filter(([key]) => key !== 'removed' || readinessCounts.removed > 0)
+          .map(([key, label]) => (
           <button
             key={key}
             onClick={() => setReadiness(readiness === key ? 'all' : key)}
@@ -651,14 +675,18 @@ export default function Sites() {
           </thead>
 
           <tbody>
-            {visible.map((site) => (
+            {visible.map((site) => {
+              const removed = isRemoved(site);
+              return (
               <tr
                 key={site.id}
                 className={`${
-                  site.demand_block === 'mostly_blocked'
+                  removed
+                    ? 'bg-tone-red-bg/50'
+                    : site.demand_block === 'mostly_blocked'
                     ? 'bg-tone-red-bg hover:brightness-[0.98]'
                     : `hover:bg-raised/60 ${(site.open_issues ?? 0) > 0 ? 'bg-tone-red-bg/25' : ''}`
-                } ${siteReadiness(site) === 'inactive' || site.demand_block === 'offline' ? 'opacity-55' : ''} ${
+                } ${!removed && (siteReadiness(site) === 'inactive' || site.demand_block === 'offline') ? 'opacity-55' : ''} ${
                   site.archived ? 'bg-tone-slate-bg/40 italic' : ''
                 }`}
               >
@@ -667,7 +695,8 @@ export default function Sites() {
                   <input type="checkbox" aria-label={`Select ${site.domain}`} checked={selected.has(site.id)} onChange={() => toggleRow(site.id)} />
                 </td>
 
-                {columns.map((column) => {
+                {/* Prio X: the prio and the domain, then only the reason - the columns no longer apply. */}
+                {(removed ? columns.slice(0, 2) : columns).map((column) => {
                   /*
                    * A save in flight is visible. Without it a request that never
                    * came back looked exactly like a saved value, and the cell
@@ -681,6 +710,7 @@ export default function Sites() {
                       title={inFlight ? 'Saving...' : undefined}
                     >
                       <Cell
+                        key={`${column.key}:${resetTick}`}
                         site={site}
                         column={column}
                         disabled={readOnly(column.key)}
@@ -691,13 +721,45 @@ export default function Sites() {
                   );
                 })}
 
+                {removed && (
+                  <td colSpan={columns.length - 2} className="overflow-hidden px-2 py-1.5">
+                    <button
+                      type="button"
+                      disabled={!can('manage_sites')}
+                      onClick={() => setRemoving(site)}
+                      className="block max-w-full truncate text-left text-xs font-semibold tracking-wide text-tone-red enabled:hover:underline disabled:cursor-default"
+                      title={[
+                        removedLine(site),
+                        site.removed_by_name || site.removed_at ? `Removed${site.removed_by_name ? ` by ${site.removed_by_name}` : ''}${site.removed_at ? ` on ${new Date(`${site.removed_at.replace(' ', 'T')}Z`).toLocaleDateString()}` : ''}.` : '',
+                        can('manage_sites') ? 'Click to change the reason. To bring the site back, type a number into Prio.' : '',
+                      ]
+                        .filter(Boolean)
+                        .join('\n')}
+                    >
+                      {removedLine(site)}
+                    </button>
+                  </td>
+                )}
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
 
         {visible.length === 0 && <Empty>No site matches the current filters.</Empty>}
       </div>
+
+      {removing && (
+        <RemoveFromNetworkModal
+          site={removing}
+          onClose={() => setRemoving(null)}
+          onRemoved={(saved) => {
+            setSites((current) => current.map((s) => (s.id === saved.id ? { ...s, ...saved } : s)));
+            setRemoving(null);
+            setNotice({ tone: 'green', text: `${saved.domain}: ${removedLine(saved)}` });
+          }}
+        />
+      )}
 
       {adding && (
         <AddSiteModal
@@ -824,7 +886,9 @@ function Cell({
     const missing = missingTracks(site);
     // The name comes first: a truncated domain had no way to be read in full.
     const state =
-      readiness === 'inactive'
+      readiness === 'removed'
+        ? 'removed from the network (prio X)'
+        : readiness === 'inactive'
         ? 'priority 99, not part of the active rollout'
         : readiness === 'live'
           ? 'all five tracks are Live'
@@ -850,17 +914,20 @@ function Cell({
           <span className="sr-only">{READINESS[readiness].label}. </span>
           <span className="truncate group-hover:underline">{site.domain}</span>
         </Link>
-        <DemandFlagButton site={site} disabled={disabled || Boolean(site.archived)} onSet={(next) => onCommit('demand_block', next)} />
+        {readiness !== 'removed' && (
+          <DemandFlagButton site={site} disabled={disabled || Boolean(site.archived)} onSet={(next) => onCommit('demand_block', next)} />
+        )}
       </div>
     );
   }
 
   return (
     <InlineText
-      value={value == null ? '' : String(value)}
+      value={column.key === 'priority' ? priorityLabel(value) : value == null ? '' : String(value)}
       disabled={disabled}
       onCommit={(next) => onCommit(column.key, next)}
-      type={column.kind === 'number' ? 'number' : 'text'}
+      // Prio is a text field: besides a number it takes "X" (taken out of the network).
+      type="text"
       className={column.kind === 'number' ? '!px-1 text-center tabular-nums' : ''}
     />
   );

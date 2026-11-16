@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { ActivityEntry, RpmRow, Stats } from '../lib/types';
-import { BASE_CURRENCY, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, SEVERITY, TRACK_STATUS, daysSince, formatMoney, formatUplift, formatWaiting } from '@shared/domain.js';
+import { BASE_CURRENCY, ISSUE_CATEGORY, ISSUE_STATUS, ISSUE_TYPE, REMOVED_PRIORITY, SEVERITY, TRACK_STATUS, daysSince, formatMoney, formatUplift, formatWaiting } from '@shared/domain.js';
 import { Badge, Empty, Spinner, TONE_BG, TONE_TEXT, Timestamp, type Tone } from '../components/ui';
 
 export default function Dashboard() {
@@ -347,6 +347,12 @@ function ActivityLine({ entry }: { entry: ActivityEntry }) {
         if (entry.new_value === 'offline') return <>took the site offline (mostly blocked by demand partners)</>;
         return <>cleared the demand-partner flag</>;
       }
+      if (field === 'removed_reason') {
+        if (!entry.new_value) return <>brought the site back into the network</>;
+        if (entry.old_value) return <>changed why the site was removed: "{entry.new_value}"</>;
+        return <span className="font-medium text-tone-red">removed the site from the network (prio X): "{entry.new_value}"</span>;
+      }
+      if (field === 'priority' && Number(entry.new_value) >= REMOVED_PRIORITY) return <>set the priority to X</>;
       const label = FIELD_LABELS[field] ?? field;
       const value = TRACK_FIELDS.has(field)
         ? (TRACK_STATUS[entry.new_value as keyof typeof TRACK_STATUS]?.label ?? entry.new_value)

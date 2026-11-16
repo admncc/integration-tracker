@@ -175,7 +175,15 @@ export function InlineText({
         if (event.target.value !== value) onCommit(event.target.value);
       }}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') event.currentTarget.blur();
+        if (event.key === 'Enter') {
+          /*
+           * Enter only saves. Let through, it reached whatever took the focus
+           * next - the close button of a dialog the save opened (prio X asks
+           * for a reason), which then shut at once.
+           */
+          event.preventDefault();
+          event.currentTarget.blur();
+        }
         if (event.key === 'Escape') {
           event.currentTarget.value = value;
           event.currentTarget.blur();

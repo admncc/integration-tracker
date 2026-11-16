@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { ActivityEntry, Issue, Site, SiteMessage, User } from '../lib/types';
-import { APPROVAL, CMP, CURRENCIES, DEMAND_BLOCK, ISSUE_STATUS, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, missingTracks, rpmUplift, siteCompletion, siteReadiness } from '@shared/domain.js';
+import { APPROVAL, CMP, CURRENCIES, DEMAND_BLOCK, ISSUE_STATUS, READINESS, TRACKS, TRACK_STATUS, formatMoney, formatUplift, isRemoved, missingTracks, priorityLabel, rpmUplift, siteCompletion, siteReadiness } from '@shared/domain.js';
+import { RemoveFromNetworkModal, isRemoveCommand, removedLine } from '../components/RemovedSite';
 import { Badge, Button, Empty, InlineSelect, InlineText, Modal, Spinner, Timestamp, type Tone } from '../components/ui';
 import IssueCard from '../components/IssueCard';
 import IssueModal from '../components/IssueModal';
@@ -32,6 +33,10 @@ export default function SiteDetail() {
   const [error, setError] = useState('');
   const [filter, setFilter] = useState<IssueFilter>('open');
   const [composing, setComposing] = useState(false);
+  /** Prio set to X: the reason is asked for first. */
+  const [removing, setRemoving] = useState(false);
+  /** Bumped to put a field back to its saved value after a refused or cancelled edit. */
+  const [resetTick, setResetTick] = useState(0);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [confirmText, setConfirmText] = useState('');
   const [movingBack, setMovingBack] = useState(false);
@@ -67,6 +72,12 @@ export default function SiteDetail() {
 
   async function patchSite(field: string, raw: string) {
     if (!site) return;
+    if (field === 'priority' && isRemoveCommand(raw)) {
+      setResetTick((tick) => tick + 1);
+      if (!can('manage_sites')) return setError('Only the publisher can take a site out of the network (prio X).');
+      setRemoving(true);
+      return;
+    }
     // Only the amounts are numeric - `rpm_*_currency` is a code and must stay a string.
     const numeric = field === 'priority' || field === 'rpm_previous' || field === 'rpm_primis';
     let value: string | number | boolean | null = raw;
@@ -80,7 +91,7 @@ export default function SiteDetail() {
         const parsed = parseDecimal(raw);
         if (parsed == null) {
           setError(`"${raw}" is not a number. The previous value was kept.`);
-          setSite({ ...site });
+          setResetTick((tick) => tick + 1);
           return;
         }
         value = parsed;
@@ -130,7 +141,7 @@ export default function SiteDetail() {
           <p className="text-sm text-ink-soft">
             <Badge tone={READINESS[readiness].tone as Tone}>{READINESS[readiness].label}</Badge>{' '}
             {site.archived === 1 && <Badge tone="muted">Archived</Badge>}{' '}
-            Priority {site.priority} · {openCount} open issue(s) · {doneCount} closed · added <Timestamp iso={site.created_at} />
+            Priority {priorityLabel(site.priority)} · {openCount} open issue(s) · {doneCount} closed · added <Timestamp iso={site.created_at} />
           </p>
           {readiness === 'incomplete' && (
             <p className="text-xs text-tone-red">Still to go live: {missingTracks(site).join(', ')}</p>
@@ -159,11 +170,44 @@ export default function SiteDetail() {
         </div>
       </div>
 
-      <DemandBlockPanel
-        site={site}
-        disabled={readOnly('demand_block') || Boolean(site.archived)}
-        onSet={(value) => patchSite('demand_block', value)}
-      />
+      {isRemoved(site) && (
+        <div role="status" className="flex flex-wrap items-center gap-3 rounded-xl border border-tone-red/40 bg-tone-red-bg px-4 py-3 text-sm text-tone-red">
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold tracking-wide [overflow-wrap:anywhere]">{removedLine(site)}</p>
+            <p className="text-xs opacity-80">
+              Prio X{site.removed_by_name ? ` · by ${site.removed_by_name}` : ''}
+              {site.removed_at ? <> · <Timestamp iso={site.removed_at} /></> : null}
+              {' · '}Type a number into Priority to bring it back into the network.
+            </p>
+          </div>
+          {can('manage_sites') && (
+            <Button size="sm" onClick={() => setRemoving(true)}>
+              Change reason
+            </Button>
+          )}
+        </div>
+      )}
+
+      {removing && (
+        <RemoveFromNetworkModal
+          site={site}
+          onClose={() => setRemoving(false)}
+          onRemoved={(saved) => {
+            setSite(saved);
+            setRemoving(false);
+            load();
+          }}
+        />
+      )}
+
+      {/* Out of the network, the demand side's verdict no longer applies. */}
+      {!isRemoved(site) && (
+        <DemandBlockPanel
+          site={site}
+          disabled={readOnly('demand_block') || Boolean(site.archived)}
+          onSet={(value) => patchSite('demand_block', value)}
+        />
+      )}
 
       <TestUrlBar url={site.test_url} disabled={readOnly('test_url')} onSave={(value) => patchSite('test_url', value)} />
 
@@ -227,7 +271,8 @@ export default function SiteDetail() {
 
             <dl className="mt-4 grid gap-3 border-t border-line pt-4 sm:grid-cols-2">
               <Editable label="Domain" value={site.domain} disabled={readOnly('domain')} onCommit={(v) => patchSite('domain', v)} />
-              <Editable label="Priority" value={String(site.priority)} type="number" disabled={readOnly('priority')} onCommit={(v) => patchSite('priority', v)} />
+              {/* A text field: a number, or X to take the site out of the network. */}
+              <Editable key={`priority:${resetTick}`} label="Priority" value={priorityLabel(site.priority)} disabled={readOnly('priority')} onCommit={(v) => patchSite('priority', v)} />
               <div>
                 <span className="text-xs text-ink-faint">Responsible</span>
                 <div className="mt-0.5">
@@ -724,6 +769,7 @@ const FIELD_LABELS: Record<string, string> = {
   owner_id: 'who is responsible',
   demand_block: 'the demand-partner flag',
   archived: 'the archived flag',
+  removed_reason: 'why it was removed from the network',
 };
 
 function describe(entry: ActivityEntry, users: User[] = []) {
@@ -745,6 +791,7 @@ function describe(entry: ActivityEntry, users: User[] = []) {
   const label = (value: string | null) => {
     if (entry.field === 'owner_id') return person(value);
     if (!value) return '-';
+    if (entry.field === 'priority') return priorityLabel(value);
     return VALUE_MAPS[entry.field ?? '']?.[value]?.label ?? value;
   };
 
@@ -767,6 +814,18 @@ function describe(entry: ActivityEntry, users: User[] = []) {
       return <>commented: "{entry.new_value}"</>;
     case 'site_deleted':
       return <>deleted the domain {entry.new_value}</>;
+    case 'site_updated':
+      if (entry.field === 'removed_reason') {
+        if (!entry.new_value) return <>brought the site back into the network</>;
+        if (entry.old_value) return <>changed why it was removed: "{entry.new_value}"</>;
+        return <span className="font-medium text-tone-red">removed the site from the network (prio X): "{entry.new_value}"</span>;
+      }
+      return (
+        <>
+          changed <span className="text-ink">{FIELD_LABELS[entry.field ?? ''] ?? entry.field}</span> from {label(entry.old_value)} to{' '}
+          <span className="text-ink">{label(entry.new_value)}</span>
+        </>
+      );
     case 'issue_status':
       return (
         <>

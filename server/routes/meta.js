@@ -6,7 +6,10 @@ import { mailConfig, mailConfigured, sendMail } from '../lib/mail.js';
 import { publicUrl } from '../lib/login.js';
 import { BLOCK_HOURS, MAX_FAILURES, listBlocks, unblock } from '../lib/lockout.js';
 import { KEEP_DAYS, ONLINE_MINUTES } from '../lib/userlog.js';
-import { APPROVAL, CMP, DEFAULT_EUR_USD, DEMAND_BLOCK, FX_SETTING_KEY, OPEN_ISSUE_STATUSES, TRACKS, TRACK_STATUS } from '../../shared/domain.js';
+import { APPROVAL, CMP, DEFAULT_EUR_USD, DEMAND_BLOCK, FX_SETTING_KEY, OPEN_ISSUE_STATUSES, REMOVED_PRIORITY, TRACKS, TRACK_STATUS, priorityLabel } from '../../shared/domain.js';
+
+/** Sites in the network: not archived, not prio X. What the rollout numbers are about. */
+const IN_NETWORK = `archived = 0 AND priority < ${REMOVED_PRIORITY}`;
 import { FX_KEYS, fxState, refreshRate } from '../lib/fx.js';
 import { DIGEST_KEYS, buildDigest, digestPayload, digestState, isQuiet, sendDigest } from '../lib/digest.js';
 import { csvToSites, toCsv } from '../lib/sheet.js';
@@ -23,7 +26,7 @@ metaRouter.get('/stats', (_req, res) => {
       key,
       {
         label,
-        counts: db.prepare(`SELECT ${key} AS status, COUNT(*) AS n FROM sites WHERE archived = 0 GROUP BY ${key}`).all(),
+        counts: db.prepare(`SELECT ${key} AS status, COUNT(*) AS n FROM sites WHERE ${IN_NETWORK} GROUP BY ${key}`).all(),
       },
     ])
   );
@@ -51,12 +54,13 @@ metaRouter.get('/stats', (_req, res) => {
   const totals = db
     .prepare(
       `SELECT
-         (SELECT COUNT(*) FROM sites WHERE archived = 0) AS sites,
+         (SELECT COUNT(*) FROM sites WHERE ${IN_NETWORK}) AS sites,
          (SELECT COUNT(*) FROM sites
            WHERE archived = 0 AND priority < 99
              AND status_video = 'live' AND status_display = 'live' AND status_ads_txt = 'live'
              AND status_ad_tag = 'live' AND status_mcm = 'live') AS fully_live,
-         (SELECT COUNT(*) FROM sites WHERE archived = 0 AND priority >= 99) AS inactive,
+         (SELECT COUNT(*) FROM sites WHERE ${IN_NETWORK} AND priority >= 99) AS inactive,
+         (SELECT COUNT(*) FROM sites WHERE archived = 0 AND priority >= ${REMOVED_PRIORITY}) AS removed,
          (SELECT COUNT(*) FROM issues i LEFT JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL) AND i.status IN (${openPlaceholders})) AS open_issues,
          (SELECT COUNT(*) FROM issues i LEFT JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL) AND i.status = 'ready_for_qa') AS awaiting_qa,
          (SELECT COUNT(*) FROM issues i LEFT JOIN sites s ON s.id = i.site_id WHERE i.deleted_at IS NULL AND (s.archived = 0 OR i.site_id IS NULL) AND i.status = 'verified') AS verified,
@@ -73,7 +77,7 @@ metaRouter.get('/stats', (_req, res) => {
   const inBase = (column, currencyColumn) => `(CASE WHEN ${currencyColumn} = 'USD' THEN ${column} / ${eurUsd} ELSE ${column} END)`;
   const prevBase = inBase('rpm_previous', 'rpm_previous_currency');
   const primisBase = inBase('rpm_primis', 'rpm_primis_currency');
-  const comparable = `archived = 0 AND rpm_previous IS NOT NULL AND rpm_primis IS NOT NULL AND rpm_previous > 0`;
+  const comparable = `${IN_NETWORK} AND rpm_previous IS NOT NULL AND rpm_primis IS NOT NULL AND rpm_previous > 0`;
 
   const revenue = db
     .prepare(
@@ -98,7 +102,7 @@ metaRouter.get('/stats', (_req, res) => {
     .all();
 
   const missingRpm = db
-    .prepare('SELECT COUNT(*) AS n FROM sites WHERE archived = 0 AND (rpm_previous IS NULL OR rpm_primis IS NULL)')
+    .prepare(`SELECT COUNT(*) AS n FROM sites WHERE ${IN_NETWORK} AND (rpm_previous IS NULL OR rpm_primis IS NULL)`)
     .get().n;
 
   /*
@@ -579,7 +583,7 @@ metaRouter.get('/export.csv', (_req, res) => {
     'PRIO', 'Domain', 'STATUS (video)', 'STATUS (display)', 'TEST URL', 'Ads.txt (ManagerDomain)',
     'STATUS (ads.txt & ad tag)', 'MCM', 'CMP', 'Demand partner approval',
     'Previous Session RPM', 'Previous RPM currency', 'Primis Session RPM', 'Primis RPM currency',
-    'Responsible', 'Managed by', 'Open issues', 'Latest message', 'Demand partners',
+    'Responsible', 'Managed by', 'Open issues', 'Latest message', 'Demand partners', 'Removed from network',
   ];
   const latestMessage = new Map(
     db
@@ -606,13 +610,14 @@ metaRouter.get('/export.csv', (_req, res) => {
 
   const label = (map, key) => map[key]?.label ?? key;
   const rows = sites.map((s) => [
-    s.priority, s.domain,
+    priorityLabel(s.priority), s.domain,
     label(TRACK_STATUS, s.status_video), label(TRACK_STATUS, s.status_display), s.test_url,
     label(TRACK_STATUS, s.status_ads_txt), label(TRACK_STATUS, s.status_ad_tag), label(TRACK_STATUS, s.status_mcm),
     label(CMP, s.cmp), label(APPROVAL, s.approval),
     s.rpm_previous ?? '', s.rpm_previous_currency, s.rpm_primis ?? '', s.rpm_primis_currency,
     s.owner_name ?? '', s.managed_by, openCounts.get(s.id) ?? 0, latestMessage.get(s.id) ?? '',
     s.demand_block === 'none' ? '' : label(DEMAND_BLOCK, s.demand_block),
+    s.removed_reason ?? '',
   ]);
 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');

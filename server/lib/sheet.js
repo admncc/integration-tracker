@@ -3,6 +3,7 @@
  * The sheet's values are hand-typed and inconsistent ("Tags Implemantion",
  * "Site under QAs"), so matching is fuzzy on purpose.
  */
+import { REMOVED_PRIORITY } from '../../shared/domain.js';
 
 const STATUS_PATTERNS = [
   // "n/a" first: it is the one label with no number, and the digit patterns
@@ -193,6 +194,8 @@ export function csvToSites(text) {
     // The API bounds priority to 1-99. `|| 99` also swallowed a legitimate 0,
     // silently parking every domain a sheet marked as top priority.
     priority: (v) => {
+      // "X" is how the export writes a site taken out of the network; reading it back keeps it out.
+      if (/^\s*x\s*$/i.test(String(v ?? ''))) return REMOVED_PRIORITY;
       const n = Number.parseInt(v, 10);
       if (!Number.isFinite(n)) return 99;
       return Math.min(99, Math.max(1, n));

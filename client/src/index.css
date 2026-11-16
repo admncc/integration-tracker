@@ -1,5 +1,8 @@
 @import 'tailwindcss';
 
+/* shared/domain.js names classes too (the status dots in READINESS); without this only those also used in client/ were built. */
+@source '../../shared';
+
 /*
  * `pinned:` - a screen big enough to keep a page's heading, filters and alerts
  * in place while only its table scrolls (the Sites tabs). Smaller than this -

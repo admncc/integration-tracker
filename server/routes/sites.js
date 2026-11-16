@@ -5,7 +5,7 @@ import { requireAuth, requireRole } from '../lib/auth.js';
 import { removeUpload } from '../lib/uploads.js';
 import { normaliseDomain } from '../lib/sheet.js';
 import { isWatching } from '../lib/notify.js';
-import { APPROVAL, CMP, CURRENCIES, DEMAND_BLOCK, OPEN_ISSUE_STATUSES, TRACK_STATUS } from '../../shared/domain.js';
+import { APPROVAL, CMP, CURRENCIES, DEMAND_BLOCK, OPEN_ISSUE_STATUSES, REMOVED_PRIORITY, TRACK_STATUS, isRemoved } from '../../shared/domain.js';
 
 export const sitesRouter = Router();
 sitesRouter.use(requireAuth);
@@ -72,6 +72,20 @@ const createSchema = z.object(siteFields).partial().required({ domain: true }).s
 const updateSchema = z.object(siteFields).partial().strict();
 
 /**
+ * One site at a time, the publisher can also take it out of the network: prio
+ * "X" on screen, with a reason. Not part of the bulk change or the importer -
+ * a reason is about one domain.
+ */
+const patchSchema = updateSchema
+  .extend({
+    removed_reason: z.preprocess(
+      cleanText,
+      z.string().trim().min(1, 'Say why the site leaves the network').max(500, 'Keep the reason under 500 characters')
+    ).optional(),
+  })
+  .strict();
+
+/**
  * The same field rules, for the CSV importer. A pasted sheet used to reach the
  * table unchecked, so a negative RPM the API rejects with a 400 went straight in
  * and then silently dropped the domain out of the dashboard comparison.
@@ -105,6 +119,15 @@ function partnerRefusal(changes) {
   return null;
 }
 
+/** A number for a prio-X site brings it back into the network: the publisher's call, like taking it out. */
+const BACK_REFUSAL = 'Only the publisher can bring a removed site back into the network';
+
+/** Logged next to the priority change when a removed site gets a number again (the trigger in db.js clears the reason). */
+function logBackInNetwork(site, actorId, nextPriority) {
+  if (!isRemoved(site) || nextPriority == null || Number(nextPriority) >= REMOVED_PRIORITY) return;
+  logActivity({ siteId: site.id, actorId, kind: 'site_updated', field: 'removed_reason', oldValue: site.removed_reason, newValue: null });
+}
+
 /** Who flagged or cleared a site and when, kept next to the flag itself. */
 const stampDemandBlock = db.prepare(
   `UPDATE sites SET demand_block_since = CASE WHEN demand_block = 'none' THEN NULL ELSE datetime('now') END,
@@ -113,7 +136,12 @@ const stampDemandBlock = db.prepare(
 );
 
 export const importRowSchema = z
-  .object({ ...siteFields, notes: z.string().trim().max(20000) })
+  .object({
+    ...siteFields,
+    // The sheet may carry prio X (written by the export as "X", read back as REMOVED_PRIORITY).
+    priority: z.coerce.number().int().min(1).max(REMOVED_PRIORITY),
+    notes: z.string().trim().max(20000),
+  })
   .partial()
   .required({ domain: true })
   .strict();
@@ -132,7 +160,7 @@ function listSites({ includeArchived = false } = {}) {
   return db
     .prepare(
       `SELECT s.*, o.name AS owner_name, o.company AS owner_company, o.role AS owner_role,
-              b.name AS demand_block_by_name,
+              b.name AS demand_block_by_name, rb.name AS removed_by_name,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status IN (${openList})) AS open_issues,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status = 'ready_for_qa') AS awaiting_qa,
               (SELECT COUNT(*) FROM issues i WHERE i.site_id = s.id AND i.deleted_at IS NULL AND i.status = 'blocked') AS blocked_issues,
@@ -141,6 +169,7 @@ function listSites({ includeArchived = false } = {}) {
          FROM sites s
          LEFT JOIN users o ON o.id = s.owner_id
          LEFT JOIN users b ON b.id = s.demand_block_by
+         LEFT JOIN users rb ON rb.id = s.removed_by
         WHERE (? = 1 OR s.archived = 0)
         ORDER BY s.priority ASC, s.domain ASC`
     )
@@ -155,8 +184,9 @@ sitesRouter.get('/:id', (req, res) => {
   const site = db
     .prepare(
       `SELECT s.*, o.name AS owner_name, o.company AS owner_company, o.role AS owner_role,
-              b.name AS demand_block_by_name
+              b.name AS demand_block_by_name, rb.name AS removed_by_name
          FROM sites s LEFT JOIN users o ON o.id = s.owner_id LEFT JOIN users b ON b.id = s.demand_block_by
+         LEFT JOIN users rb ON rb.id = s.removed_by
         WHERE s.id = ?`
     )
     .get(Number(req.params.id));
@@ -394,6 +424,9 @@ sitesRouter.patch('/bulk', requireRole('admin', 'dev', 'partner'), (req, res) =>
     .prepare(`SELECT * FROM sites WHERE id IN (${ids.map(() => '?').join(',')}) AND archived = 0`)
     .all(...ids);
   if (!sites.length) return res.status(404).json({ error: 'None of those domains exist, or all of them are archived' });
+  if (req.user.role === 'partner' && 'priority' in parsed.data.changes && sites.some(isRemoved)) {
+    return res.status(403).json({ error: BACK_REFUSAL });
+  }
 
   const assignments = fields.map(([field]) => `${field} = ?`).join(', ');
   const update = db.prepare(`UPDATE sites SET ${assignments}, updated_at = datetime('now') WHERE id = ?`);
@@ -420,6 +453,7 @@ sitesRouter.patch('/bulk', requireRole('admin', 'dev', 'partner'), (req, res) =>
       for (const [field, value] of differs) {
         logActivity({ siteId: site.id, actorId: req.user.id, kind: 'site_updated', field, oldValue: site[field], newValue: normalise(value) });
       }
+      logBackInNetwork(site, req.user.id, parsed.data.changes.priority);
     }
     db.exec('COMMIT');
   } catch (err) {
@@ -443,8 +477,10 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
   const site = db.prepare('SELECT * FROM sites WHERE id = ?').get(id);
   if (!site) return res.status(404).json({ error: 'Site not found' });
 
-  const parsed = updateSchema.safeParse(req.body);
+  const parsed = patchSchema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: firstMessage(parsed.error), details: parsed.error.flatten() });
+
+  if ('removed_reason' in parsed.data) return removeFromNetwork(req, res, site, parsed.data);
 
   const badOwner = 'owner_id' in parsed.data ? ownerError(parsed.data.owner_id) : null;
   if (badOwner) return res.status(400).json({ error: badOwner });
@@ -459,6 +495,7 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
     // happened when it had not.
     const refusal = partnerRefusal(parsed.data);
     if (refusal) return res.status(403).json({ error: refusal });
+    if ('priority' in parsed.data && isRemoved(site)) return res.status(403).json({ error: BACK_REFUSAL });
   }
 
   const updates = Object.entries(parsed.data).filter(([field, value]) => normalise(value) !== site[field]);
@@ -472,8 +509,50 @@ sitesRouter.patch('/:id', requireRole('admin', 'dev', 'partner'), (req, res) => 
   for (const [field, value] of updates) {
     logActivity({ siteId: id, actorId: req.user.id, kind: 'site_updated', field, oldValue: site[field], newValue: normalise(value) });
   }
+  logBackInNetwork(site, req.user.id, parsed.data.priority);
   res.json({ site: listSites({ includeArchived: true }).find((row) => row.id === id) });
 });
+
+/**
+ * Prio "X": the site leaves the network, and the reason is what its row shows
+ * from then on. The priority it had is not kept - giving it a number again is
+ * how it comes back. Sent again on a removed site, it changes the reason.
+ *
+ * A site still flagged as mostly blocked has, by being removed, been taken
+ * offline: the flag moves to "Taken offline", which ends that alert.
+ */
+function removeFromNetwork(req, res, site, data) {
+  if (req.user.role === 'partner') return res.status(403).json({ error: 'Only the publisher can take a site out of the network' });
+  if (Object.keys(data).length > 1) return res.status(400).json({ error: 'Take a site out of the network on its own, not together with other changes' });
+  if (site.archived) return res.status(409).json({ error: `${site.domain} is archived. Bring it back before changing its priority.` });
+
+  const reason = data.removed_reason;
+  if (isRemoved(site) && site.removed_reason === reason) return res.json({ site: listSites({ includeArchived: true }).find((row) => row.id === site.id) });
+
+  db.exec('BEGIN');
+  try {
+    if (isRemoved(site)) {
+      db.prepare("UPDATE sites SET removed_reason = ?, updated_at = datetime('now') WHERE id = ?").run(reason, site.id);
+    } else {
+      db.prepare(
+        `UPDATE sites SET priority = ?, removed_reason = ?, removed_at = datetime('now'), removed_by = ?, updated_at = datetime('now')
+          WHERE id = ?`
+      ).run(REMOVED_PRIORITY, reason, req.user.id, site.id);
+    }
+    logActivity({ siteId: site.id, actorId: req.user.id, kind: 'site_updated', field: 'removed_reason', oldValue: site.removed_reason, newValue: reason });
+
+    if (site.demand_block === 'mostly_blocked') {
+      db.prepare("UPDATE sites SET demand_block = 'offline' WHERE id = ?").run(site.id);
+      stampDemandBlock.run(req.user.id, site.id);
+      logActivity({ siteId: site.id, actorId: req.user.id, kind: 'site_updated', field: 'demand_block', oldValue: 'mostly_blocked', newValue: 'offline' });
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  res.json({ site: listSites({ includeArchived: true }).find((row) => row.id === site.id) });
+}
 
 sitesRouter.delete('/:id', requireRole('admin'), (req, res) => {
   const id = Number(req.params.id);
@@ -687,6 +766,7 @@ const FIELD_LABELS = {
   rpm_primis_currency: 'Primis RPM currency',
   managed_by: 'Managed by',
   archived: 'Archived',
+  removed_reason: 'Reason',
 };
 
 /** Zod's first concrete complaint beats a generic "Invalid site data". */

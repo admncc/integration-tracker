@@ -44,6 +44,10 @@ export interface Site {
   demand_block: DemandBlock;
   demand_block_since?: string | null;
   demand_block_by_name?: string | null;
+  /** Prio X (priority 100): taken out of the network, and why. */
+  removed_reason?: string | null;
+  removed_at?: string | null;
+  removed_by_name?: string | null;
   owner_company?: string | null;
   owner_role?: Role | null;
   notes: string;

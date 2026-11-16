@@ -90,6 +90,19 @@ tool:
 | 🟢 green | all five tracks are **1 - Live** |
 | 🔴 red | at least one track is not; the detail page names which |
 | ⚪ grey | priority 99 - listed, but not part of the active rollout |
+| ⚫ black | prio **X** - removed from the network |
+
+**Prio X - removed from the network.** Type `X` into a site's Prio (in the
+table or on its page) and the tracker asks why. From then on the row sits at
+the bottom, below prio 99, whatever the table is sorted by, and shows only the
+prio, the domain and a red line: *REMOVED FROM NETWORK DUE: <reason>*. Clicking
+that line changes the reason. The site drops out of the dashboard's rollout
+numbers; its history, issues and discussion stay. A site still flagged as
+mostly blocked by demand partners counts as taken offline, which ends that
+alert. Typing a number into Prio brings it back. Removing and bringing back is
+the publisher's call: the partner is told so if they try. The CSV export
+writes `X` and the reason, and an imported sheet with `X` in PRIO keeps or
+puts the site out.
 
 Open issues are a separate signal: the issue count in its own column, and a
 tinted row.
