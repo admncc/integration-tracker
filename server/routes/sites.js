@@ -526,7 +526,8 @@ function removeFromNetwork(req, res, site, data) {
   if (Object.keys(data).length > 1) return res.status(400).json({ error: 'Take a site out of the network on its own, not together with other changes' });
   if (site.archived) return res.status(409).json({ error: `${site.domain} is archived. Bring it back before changing its priority.` });
 
-  const reason = data.removed_reason;
+  // The row already reads "REMOVED FROM NETWORK DUE:" - typed into the reason as well, it showed twice.
+  const reason = data.removed_reason.replace(/^(\s*removed from (the )?network( due)?\s*:?\s*)+/i, '').trim() || data.removed_reason;
   if (isRemoved(site) && site.removed_reason === reason) return res.json({ site: listSites({ includeArchived: true }).find((row) => row.id === site.id) });
 
   db.exec('BEGIN');

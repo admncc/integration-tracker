@@ -8,8 +8,11 @@ export const isRemoveCommand = (raw: string) => /^\s*x\s*$/i.test(raw);
 
 /** The line a removed site's row carries instead of its columns. */
 export function removedLine(site: Pick<Site, 'removed_reason'>) {
-  return `REMOVED FROM NETWORK DUE: ${site.removed_reason?.trim() || 'no reason given'}`;
+  return `REMOVED FROM NETWORK DUE: ${withoutPrefix(site.removed_reason ?? '') || 'no reason given'}`;
 }
+
+/** The line already starts with the words; typed (or pasted) into the reason too, they showed twice. */
+export const withoutPrefix = (reason: string) => reason.replace(/^(\s*removed from (the )?network( due)?\s*:?\s*)+/i, '').trim();
 
 /**
  * Prio "X": asks why before the site leaves the network. Sent again for a site
@@ -26,7 +29,7 @@ export function RemoveFromNetworkModal({
   onRemoved: (site: Site) => void;
 }) {
   const editing = Boolean(site.removed_reason);
-  const [reason, setReason] = useState(site.removed_reason ?? '');
+  const [reason, setReason] = useState(withoutPrefix(site.removed_reason ?? ''));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const box = useRef<HTMLTextAreaElement>(null);
@@ -43,7 +46,7 @@ export function RemoveFromNetworkModal({
     setBusy(true);
     setError('');
     try {
-      const { site: saved } = await api.patch<{ site: Site }>(`/sites/${site.id}`, { removed_reason: reason.trim() });
+      const { site: saved } = await api.patch<{ site: Site }>(`/sites/${site.id}`, { removed_reason: withoutPrefix(reason) || reason.trim() });
       onRemoved(saved);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save');

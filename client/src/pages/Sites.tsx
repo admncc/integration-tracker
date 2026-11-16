@@ -902,7 +902,7 @@ function Cell({
           to={`/sites/${site.id}`}
           className={`group flex min-w-0 flex-1 items-center gap-1.5 font-medium hover:text-brand ${
             blocked ? 'text-tone-red' : readiness === 'inactive' ? 'text-ink-faint' : ''
-          } ${site.demand_block === 'offline' ? 'line-through' : ''}`}
+          } ${site.demand_block === 'offline' && readiness !== 'removed' ? 'line-through' : ''}`}
           title={blocked ? `${site.domain} - mostly blocked by demand partners ${flaggedBy(site)}` : site.demand_block === 'offline' ? `${site.domain} - taken offline` : title}
         >
           <span aria-hidden className={`size-2 shrink-0 rounded-full ${READINESS[readiness].dot}`} />
